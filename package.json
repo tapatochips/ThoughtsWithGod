@@ -13,11 +13,14 @@
     "expo": "~52.0.35",
     "expo-status-bar": "~2.0.1",
     "react": "18.3.1",
-    "react-native": "0.76.7"
+    "react-native": "0.76.7",
+    "react-native-dotenv": "^3.4.11",
+    "react-native-render-html": "^6.3.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~18.3.12",
+    "@types/react-native": "^0.72.8",
     "typescript": "^5.3.3"
   },
   "private": true
