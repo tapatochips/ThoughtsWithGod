@@ -1,12 +1,28 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
 import VerseDisplay from './VerseDisplay';
+import AuthScreen from './AuthScreen';
+import { auth } from './firebase';
+import { User } from 'firebase/auth';
 
-export default function App() {
+const App = () => {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user: User | null) => {
+      setUser(user);
+    });
+    return unsubscribe;
+  }, []);
+
   return (
     <View style={styles.container}>
-      <VerseDisplay />
+      {user ? (
+        <VerseDisplay user={user}/>
+      ) : (
+        <AuthScreen />
+      )}
       <StatusBar style="auto" />
     </View>
   );
@@ -20,3 +36,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+
+export default App;
