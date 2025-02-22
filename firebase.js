@@ -1,40 +1,35 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
 import { getFirestore } from "firebase/firestore";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import Constants from 'expo-constants';
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: "AIzaSyDfU8MvzvZpegiIdf11OTQ4WDSjqfGtknE",
-    authDomain: "thoughtswithgod-a5a08.firebaseapp.com",
-    projectId: "thoughtswithgod-a5a08",
-    storageBucket: "thoughtswithgod-a5a08.firebasestorage.app",
-    messagingSenderId: "307700418079",
-    appId: "1:307700418079:web:dfb49050b7113ef51f772a",
-    measurementId: "G-ZRLXCYP3S2"
+    apiKey: Constants.expoConfig?.extra.FIREBASE_API_KEY || Constants.manifest?.extra.FIREBASE_API_KEY,
+    authDomain: Constants.expoConfig?.extra.FIREBASE_AUTH_DOMAIN || Constants.manifest?.extra.FIREBASE_AUTH_DOMAIN,
+    projectId: Constants.expoConfig?.extra.FIREBASE_PROJECT_ID || Constants.manifest?.extra.FIREBASE_PROJECT_ID,
+    storageBucket: Constants.expoConfig?.extra.FIREBASE_STORAGE_BUCKET || Constants.manifest?.extra.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: Constants.expoConfig?.extra.FIREBASE_MESSAGING_SENDER_ID || Constants.manifest?.extra.FIREBASE_MESSAGING_SENDER_ID,
+    appId: Constants.expoConfig?.extra.FIREBASE_APP_ID || Constants.manifest?.extra.FIREBASE_APP_ID,
+    measurementId: Constants.expoConfig?.extra.FIREBASE_MEASUREMENT_ID || Constants.manifest?.extra.FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase
+// Log the config for debugging (remove in production)
+console.log("Firebase Config:", firebaseConfig);
+
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(ReactNativeAsyncStorage)  // Use AsyncStorage for persistence
-})
+    persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+});
 
 let analytics = null;
 if (isSupported()) {
     analytics = getAnalytics(app);
 } else {
-    console.warn("Firebase analytics is not supported.")
+    console.warn("Firebase analytics is not supported.");
 }
 
-// Export the initialized Firebase app and Firestore database
-
 export { app, analytics, db, auth };
-//const analytics = getAnalytics(app);
