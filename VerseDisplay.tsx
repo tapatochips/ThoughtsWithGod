@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, Button, useWindowDimensions } from 'react-nativ
 import verses from './data/combinedBible.json';
 import RenderHtml from 'react-native-render-html';
 import { User } from "firebase/auth"; // Import the User type
-import { db } from "./firebase";
+import { db, firebaseInstance } from "./firebaseConfig";
+import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
 
 interface Verse {
     text: string;
@@ -20,6 +21,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
     const [verses, setVerses] = useState<Verse[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
+    //const [favoriteVerseID, setFavoriteVerseID] = useState<String | null>(null);
 
     useEffect(() => {
         try {
@@ -35,11 +37,19 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
             setLoading(false);
         }
 
-        if (user) { // Now you have access to the user object, and TypeScript knows about it
-            console.log("User logged in:", user.uid);
-            // You can use user.uid to fetch user-specific data from Firestore, etc.
+        if (user && currentVerse && firebaseInstance.isDbInitialized() &&db) { 
+            const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
+            const verseDocument = doc(favoritesCollection, currentVerse.text);
+
+            const unsubscribe = onSnapshot(verseDocument, (doc: DocumentSnapshot) => {
+                setIsFavorite(doc.exists);
+            });
+
+            return unsubscribe;
+        } else {
+            setIsFavorite(false);
         }
-    }, [currentVerse, user]); // Add user to the dependency array
+    }, [currentVerse, user]); 
 
     const handleNextVerse = () => {
         if (verses && verses.length > 0) {
@@ -47,6 +57,25 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
             setCurrentVerse(verses[randomIndex]);
         }
     };
+
+    const handleFavoritePress = async () => {
+        if (!user || !currentVerse || !db) return;
+
+        const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
+        const verseDocument = doc(favoritesCollection, currentVerse.text);
+
+        try {
+            if (isFavorite) {
+                await deleteDoc(verseDocument);
+            } else {
+                await setDoc(verseDocument, currentVerse);
+            }
+            setIsFavorite(!isFavorite);
+        } catch(error) {
+            console.error('Failed to update favorite status:', error);
+        }
+
+    }
 
     if (loading) {
         return <Text>Loading Verse...</Text>;
@@ -62,6 +91,12 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
                 <>
                     <RenderHtml source={{ html: currentVerse.text }} contentWidth={width} />
                     <Button title="Next Verse" onPress={handleNextVerse} />
+                    {user && currentVerse  && (
+                        <Button
+                        title={isFavorite? 'Remove from Favorites' : 'Add to Favorites'}
+                        onPress={handleFavoritePress}
+                        />
+                    )}
                 </>
             ) : (
                 <Text>No verse selected yet.</Text>

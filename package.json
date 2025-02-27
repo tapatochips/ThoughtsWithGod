@@ -2,7 +2,7 @@
   "name": "thoughtswithgod",
   "license": "0BSD",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "index.tsx",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -10,20 +10,21 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "^1.24.0",
+    "@react-native-async-storage/async-storage": "^1.23.1",
     "expo": "~52.0.35",
+    "expo-constants": "~17.0.7",
     "expo-status-bar": "~2.0.1",
     "firebase": "^11.3.1",
-    "react": "18.3.1",
-    "react-native": "0.76.7",
-    "react-native-dotenv": "^3.4.11",
-    "react-native-render-html": "^6.3.4",
-    "expo-constants": "~17.0.7"
+    "react": "^18.3.1",
+    "react-native": "^0.76.7",
+    "react-native-render-html": "^6.3.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~18.3.12",
     "@types/react-native": "^0.72.8",
+    "expo-cli": "^4.0.17",
+    "expo-module-scripts": "^4.0.4",
     "typescript": "^5.3.3"
   },
   "private": true

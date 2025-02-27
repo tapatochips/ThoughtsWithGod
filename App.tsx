@@ -1,32 +1,64 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import VerseDisplay from './VerseDisplay';
 import AuthScreen from './AuthScreen';
-import { auth } from './firebase';
-import { User } from 'firebase/auth';
+import { useFirebase } from './FirebaseContext'; // Import useFirebase
+import { User } from 'firebase/auth'; // Import User type
 
 const App = () => {
+  const { auth, firebaseInstance } = useFirebase(); // Access auth and firebaseInstance
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user: User | null) => {
-      setUser(user);
-    });
-    return unsubscribe;
-  }, []);
+    if (firebaseInstance.isAuthInitialized() && auth) { // Use firebaseInstance and check auth
+      const unsubscribe = auth.onAuthStateChanged(
+        (currentUser: User | null) => { // Specify the type of currentUser
+          setUser(currentUser);
+          setIsLoading(false);
+        },
+        (error) => {
+          console.error("Auth state change error:", error);
+          setError("Failed to authenticate");
+          setIsLoading(false);
+        }
+      );
+      return unsubscribe;
+    } else {
+      setIsLoading(false); // Stop loading even if not initialized
+    }
+  }, [auth, firebaseInstance]);
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator />
+        <Text>Loading Authentication...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text>{error}</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       {user ? (
-        <VerseDisplay user={user}/>
+        <VerseDisplay user={user} />
       ) : (
         <AuthScreen />
       )}
       <StatusBar style="auto" />
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -36,6 +68,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
-
 
 export default App;

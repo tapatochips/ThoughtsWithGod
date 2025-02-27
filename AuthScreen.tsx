@@ -1,23 +1,32 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Button, StyleSheet } from "react-native";
-import { auth } from "./firebase";
+import { View, Text, TextInput, Button, StyleSheet, ActivityIndicator } from "react-native";
+import { auth } from "./firebaseConfig";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 
 const AuthScreen = () => {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
 
     const handleSignUp = async () => {
+        if (!auth) {
+            console.log("Auth is not initialized yet.");
+            return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+
         try {
             await createUserWithEmailAndPassword(auth, email, password);
-            //user signed up
-            console.log("user signed up");
-            setError(null);
+            console.log("User created successfully");
         } catch (err) {
-            const errorMessage = (err as { message: string }).message || "Error creating user";
+            const errorMessage = (err as Error).message || "Error creating user";
             setError(errorMessage);
             console.error("Error creating user", err);
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -37,7 +46,12 @@ const AuthScreen = () => {
                 value={password}
                 onChangeText={setPassword}
             />
-            <Button title="Sign Up" onPress={handleSignUp} />
+            {isLoading ? (
+                <ActivityIndicator />
+            ) : (
+                <Button title="Sign Up" onPress={handleSignUp} />
+            )}
+            {error && <Text style={styles.errorText}>{error}</Text>}
         </View>
     );
 };
@@ -45,22 +59,20 @@ const AuthScreen = () => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        justifyContent: 'center',
-        padding: 20,
-        backgroundColor: '#f0f0f0',
-        alignItems: 'center',
-        width: '100%',
+        justifyContent: "center",
+        padding: 16,
     },
     input: {
         height: 40,
-        borderColor: 'gray',
+        borderColor: "gray",
         borderWidth: 1,
-        marginBottom: 10,
-        paddingHorizontal: 16,
+        marginBottom: 12,
+        paddingHorizontal: 8,
+        width: '100%',
     },
     errorText: {
-        color: 'red',
-        marginBottom: 10,
+        color: "red",
+        marginTop: 8,
     },
 });
 
