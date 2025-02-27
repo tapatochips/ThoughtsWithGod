@@ -2,26 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Button, useWindowDimensions } from 'react-native';
 import verses from './data/combinedBible.json';
 import RenderHtml from 'react-native-render-html';
-import { User } from "firebase/auth"; // Import the User type
+import { User } from "firebase/auth";
 import { db, firebaseInstance } from "./firebaseConfig";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
 
 interface Verse {
+    id: string;
     text: string;
     // ... other properties if needed
 }
 
 interface VerseDisplayProps {
-    user: User | null; // Define the user prop
+    user: User | null;
 }
 
-const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the interface
+const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => {
     const { width } = useWindowDimensions();
     const [currentVerse, setCurrentVerse] = useState<Verse | null>(null);
     const [verses, setVerses] = useState<Verse[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
-    //const [favoriteVerseID, setFavoriteVerseID] = useState<String | null>(null);
 
     useEffect(() => {
         try {
@@ -36,10 +36,12 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
         } finally {
             setLoading(false);
         }
+    }, []); // Empty dependency array for initial load
 
-        if (user && currentVerse && firebaseInstance.isDbInitialized() &&db) { 
+    useEffect(() => {
+        if (user && currentVerse && currentVerse.id && firebaseInstance.isDbInitialized() && db) {
             const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
-            const verseDocument = doc(favoritesCollection, currentVerse.text);
+            const verseDocument = doc(favoritesCollection, currentVerse.id);
 
             const unsubscribe = onSnapshot(verseDocument, (doc: DocumentSnapshot) => {
                 setIsFavorite(doc.exists);
@@ -49,7 +51,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
         } else {
             setIsFavorite(false);
         }
-    }, [currentVerse, user]); 
+    }, [user, currentVerse]); // Dependency array with user and currentVerse
 
     const handleNextVerse = () => {
         if (verses && verses.length > 0) {
@@ -59,10 +61,10 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
     };
 
     const handleFavoritePress = async () => {
-        if (!user || !currentVerse || !db) return;
+        if (!user || !currentVerse || !currentVerse.id || !db) return;
 
         const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
-        const verseDocument = doc(favoritesCollection, currentVerse.text);
+        const verseDocument = doc(favoritesCollection, currentVerse.id);
 
         try {
             if (isFavorite) {
@@ -71,11 +73,10 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
                 await setDoc(verseDocument, currentVerse);
             }
             setIsFavorite(!isFavorite);
-        } catch(error) {
+        } catch (error) {
             console.error('Failed to update favorite status:', error);
         }
-
-    }
+    };
 
     if (loading) {
         return <Text>Loading Verse...</Text>;
@@ -91,10 +92,10 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => { // Use the int
                 <>
                     <RenderHtml source={{ html: currentVerse.text }} contentWidth={width} />
                     <Button title="Next Verse" onPress={handleNextVerse} />
-                    {user && currentVerse  && (
+                    {user && currentVerse && (
                         <Button
-                        title={isFavorite? 'Remove from Favorites' : 'Add to Favorites'}
-                        onPress={handleFavoritePress}
+                            title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+                            onPress={handleFavoritePress}
                         />
                     )}
                 </>
