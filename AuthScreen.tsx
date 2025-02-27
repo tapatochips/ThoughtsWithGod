@@ -1,15 +1,16 @@
 import React, { useState } from "react";
 import { View, Text, TextInput, Button, StyleSheet, ActivityIndicator } from "react-native";
 import { auth } from "./firebaseConfig";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 
 const AuthScreen = () => {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isSignUp, setIsSignUp] = useState(true);
 
-    const handleSignUp = async () => {
+    const handleAuthentication = async () => {
         if (!auth) {
             console.log("Auth is not initialized yet.");
             return;
@@ -19,15 +20,24 @@ const AuthScreen = () => {
         setError(null);
 
         try {
-            await createUserWithEmailAndPassword(auth, email, password);
-            console.log("User created successfully");
+            if (isSignUp) {
+                await createUserWithEmailAndPassword(auth, email, password);
+                console.log("User created successfully.");
+            } else {
+                await signInWithEmailAndPassword(auth, email, password);
+                console.log("User signed in successfully.");
+            }
         } catch (err) {
-            const errorMessage = (err as Error).message || "Error creating user";
+            const errorMessage =(err as Error).message || (isSignUp ? "Failed to create user" : "Failed to sign in");
             setError(errorMessage);
-            console.error("Error creating user", err);
+            console.error(isSignUp ? "Failed to create user:" : "Failed to sign in:", err);
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const toggleAuthMode = () => {
+        setIsSignUp(!isSignUp);
     };
 
     return (
@@ -49,7 +59,10 @@ const AuthScreen = () => {
             {isLoading ? (
                 <ActivityIndicator />
             ) : (
-                <Button title="Sign Up" onPress={handleSignUp} />
+                <View>
+                    <Button title={isSignUp ? "Sign Up" : "Sign In"} onPress={handleAuthentication} />
+                    <Button title={isSignUp ? "Already have an account? Sign In" : "Don't have an account? Sign Up"} onPress={toggleAuthMode} />
+                </View>
             )}
             {error && <Text style={styles.errorText}>{error}</Text>}
         </View>
