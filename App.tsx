@@ -3,8 +3,14 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import VerseDisplay from './VerseDisplay';
 import AuthScreen from './AuthScreen';
+import FavoritesScreen from './FavoritesScreen';
 import { useFirebase } from './FirebaseContext'; // Import useFirebase
 import { User } from 'firebase/auth'; // Import User type
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+
+
+const Stack = createStackNavigator();
 
 const App = () => {
   const { auth, firebaseInstance } = useFirebase(); // Access auth and firebaseInstance
@@ -49,13 +55,21 @@ const App = () => {
   }
 
   return (
-    <View style={styles.container}>
-      {user ? (
-        <VerseDisplay user={user} />
-      ) : (
-        <AuthScreen />
-      )}
-      <StatusBar style="auto" />
+    <View> {/* View as a wrapper */}
+      <NavigationContainer>
+        <Stack.Navigator>
+          {user ? (
+            <>
+              <Stack.Screen name="VerseDisplay">
+                {(props) => <VerseDisplay {...props} user={user} />}
+              </Stack.Screen>
+              <Stack.Screen name="Favorites" component={FavoritesScreen} />
+            </>
+          ) : (
+            <Stack.Screen name="Auth" component={AuthScreen} />
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
     </View>
   );
 };

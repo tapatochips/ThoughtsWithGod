@@ -1,5 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, initializeAuth,indexedDBLocalPersistence } from "firebase/auth";
+import { getAuth, initializeAuth } from "firebase/auth";
+import { getReactNativePersistence } from '@firebase/auth/react-native'; // Correct import
 import { getFirestore } from "firebase/firestore";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -37,8 +38,9 @@ class Firebase {
             this.app = getApps()[0];
         }
 
-        this.auth = initializeAuth(this.app);
-        this.auth.setPersistence(indexedDBLocalPersistence);
+        this.auth = initializeAuth(this.app, {
+            persistence: getReactNativePersistence(AsyncStorage)
+        });
         this.db = getFirestore(this.app);
 
         Firebase.instance = this;

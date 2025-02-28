@@ -1,11 +1,14 @@
 import React, { createContext, useContext, ReactNode } from 'react';
 import { app, auth, db, firebaseInstance } from './firebaseConfig';
+import FirebaseApp from './firebaseConfig';
+import { Auth } from 'firebase/auth';
+import { Firestore } from 'firebase/firestore';
 import Firebase from './firebaseConfig';
 
 interface FirebaseContextType {
-    app: typeof app;
-    auth: typeof auth;
-    db: typeof db;
+    app: FirebaseApp | null;
+    auth: Auth | null;
+    db: Firestore | null;
     firebaseInstance: Firebase | null;
 }
 
