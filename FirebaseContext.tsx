@@ -1,29 +1,35 @@
 import React, { createContext, useContext, ReactNode } from 'react';
-import { app, auth, db, firebaseInstance } from './firebaseConfig';
-import FirebaseApp from './firebaseConfig';
-import { Auth } from 'firebase/auth';
-import { Firestore } from 'firebase/firestore';
-import Firebase from './firebaseConfig';
+import { FirebaseApp } from "firebase/app";
+import { Firestore } from "firebase/firestore";
+import { Auth } from "firebase/auth";
+import { firebaseInstance } from './firebaseConfig';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
     auth: Auth | null;
     db: Firestore | null;
-    firebaseInstance: Firebase | null;
+    firebaseInstance: typeof firebaseInstance;
 }
 
 interface FirebaseProviderProps {
-    children?: ReactNode;
+    children: ReactNode;
 }
 
-const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
+const FirebaseContext = createContext<FirebaseContextType>({
+    app: null,
+    auth: null,
+    db: null,
+    firebaseInstance: firebaseInstance,
+});
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
+    console.log("FirebaseProvider rendered");
+
     const value: FirebaseContextType = {
-        app,
-        auth,
-        db,
-        firebaseInstance,
+        app: firebaseInstance.app,
+        auth: firebaseInstance.auth,
+        db: firebaseInstance.db,
+        firebaseInstance: firebaseInstance,
     };
 
     return (

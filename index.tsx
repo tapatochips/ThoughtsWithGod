@@ -2,11 +2,22 @@ import { registerRootComponent } from 'expo';
 import React from 'react';
 import App from './App';
 import { FirebaseProvider } from './FirebaseContext';
+import { ErrorBoundary } from './ErrorBoundary';
+import { withDevTools } from 'expo/devtools';
+import Constants from 'expo-constants';
 
 const Root = () => (
-    <FirebaseProvider>
-        <App />
-    </FirebaseProvider>
+    <ErrorBoundary>
+        <FirebaseProvider>
+            <App />
+        </FirebaseProvider>
+    </ErrorBoundary>
 );
 
-registerRootComponent(Root);
+let RootComponent = Root;
+
+if (__DEV__ && Constants.expoConfig?.debuggerHost) {
+    RootComponent = withDevTools(Root);
+}
+
+registerRootComponent(RootComponent);

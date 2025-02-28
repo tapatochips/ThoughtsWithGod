@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Button, useWindowDimensions } from 'react-native';
-import { auth, db, firebaseInstance } from './firebaseConfig';
-import { collection, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+import { firebaseInstance } from './firebaseConfig';
+import { collection, onSnapshot, doc, deleteDoc, Firestore } from 'firebase/firestore';
 import RenderHtml from 'react-native-render-html';
+import { auth } from './firebaseReactNative';
+import { Auth } from 'firebase/auth';
 
 interface Verse {
     id: string;
@@ -14,8 +16,9 @@ const FavoritesScreen = () => {
     const { width } = useWindowDimensions();
     const [favorites, setFavorites] = useState<Verse[]>([]);
 
+
     useEffect(() => {
-        if (auth.currentUser && firebaseInstance.isDbInitialized() && db) {
+        if (auth.currentUser && firebaseInstance.isDbInitialized()) {
             const favoritesCollection = collection(db, `users/${auth.currentUser.uid}/favorites`);
 
             const unsubscribe = onSnapshot(favoritesCollection, (snapshot) => {
@@ -31,8 +34,8 @@ const FavoritesScreen = () => {
     }, []);
 
     const handleRemoveFavorite = async (verseId: string) => {
-        if (auth.currentUser && firebaseInstance.isDbInitialized() && db) {
-            const verseDoc = doc(db, `users/${auth.currentUser.uid}/favorites`, verseId);
+        if (auth.currentUser && firebaseInstance.isDbInitialized()) {
+            const verseDoc = doc(firebaseInstance.db, `users/${auth.currentUser.uid}/favorites`, verseId);
             await deleteDoc(verseDoc);
         }
     };
