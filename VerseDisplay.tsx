@@ -1,22 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Button, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Button, useWindowDimensions, Alert } from 'react-native';
 import verses from './data/combinedBible.json';
+import versesData from './data/combinedBible.json';
+//console.log('versesData: ', versesData);
 import RenderHtml from 'react-native-render-html';
 import { User } from "firebase/auth";
 import { db, firebaseInstance } from "./firebaseConfig";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
+import { NavigationProp, ParamListBase } from '@react-navigation/native';
+
+
 
 interface Verse {
-    id: string;
+    id?: string;
     text: string;
-    // ... other properties if needed
+    bood_id: string;
+    book_name: string;
+    chapter: number;
+    info: string;
+    verse: number;
 }
 
 interface VerseDisplayProps {
     user: User | null;
+    navigation: any;
 }
 
-const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => {
+const VerseDisplay: React.FC<VerseDisplayProps> = ({ user, navigation }) => {
     const { width } = useWindowDimensions();
     const [currentVerse, setCurrentVerse] = useState<Verse | null>(null);
     const [verses, setVerses] = useState<Verse[] | null>(null);
@@ -25,21 +35,22 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => {
 
     useEffect(() => {
         try {
-            const importedVerses: Verse[] = require('./data/combinedBible.json');
-            setVerses(importedVerses);
-            if (importedVerses && importedVerses.length > 0) {
-                const initialIndex = Math.floor(Math.random() * importedVerses.length);
-                setCurrentVerse(importedVerses[initialIndex]);
+            const versesArray = versesData as Verse[];
+            setVerses(versesArray);
+            if (versesArray && versesArray.length > 0) {
+              const initialIndex = Math.floor(Math.random() * versesArray.length);
+              setCurrentVerse(versesArray[initialIndex]);
             }
-        } catch (err) {
+          } catch (err) {
             console.error('Failed to import verses:', err);
-        } finally {
+          } finally {
             setLoading(false);
-        }
+          }
     }, []); // Empty dependency array for initial load
 
     useEffect(() => {
         if (user && currentVerse && currentVerse.id && firebaseInstance.isDbInitialized() && db) {
+            const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`
             const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
             const verseDocument = doc(favoritesCollection, currentVerse.id);
 
@@ -61,21 +72,28 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => {
     };
 
     const handleFavoritePress = async () => {
+        console.log('user: ', user);
+        console.log('currentVerse: ', currentVerse);
         if (!user || !currentVerse || !currentVerse.id || !db) return;
-
+        
+        const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`;
         const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
+        console.log('fav collection ref: ', favoritesCollection.path);
         const verseDocument = doc(favoritesCollection, currentVerse.id);
 
         try {
-            if (isFavorite) {
-                await deleteDoc(verseDocument);
+            if (!isFavorite) {
+              console.log('Adding to favorites:', currentVerse, 'with id:', verseId);
+              await setDoc(verseDocument, { ...currentVerse, id: verseId });
+              console.log('Favorite added with id:', verseId);
             } else {
-                await setDoc(verseDocument, currentVerse);
+              await deleteDoc(verseDocument);
+              console.log('Favorite removed with id:', verseId);
             }
             setIsFavorite(!isFavorite);
-        } catch (error) {
+          } catch (error) {
             console.error('Failed to update favorite status:', error);
-        }
+          }
     };
 
     if (loading) {
@@ -98,6 +116,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => {
                             onPress={handleFavoritePress}
                         />
                     )}
+                    <Button title="View Favorites" onPress={() => navigation.navigate('Favorites')}></Button>
                 </>
             ) : (
                 <Text>No verse selected yet.</Text>
@@ -109,7 +128,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user }) => {
 const styles = StyleSheet.create({
     verseContainer: {
         padding: 20,
-        backgroundColor: 'f0f0f0f0',
+        backgroundColor: '#f0f0f0',
         alignItems: 'center',
         justifyContent: 'center',
         flex: 1,

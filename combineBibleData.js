@@ -15,20 +15,25 @@ const combinedData = [];
 books.forEach(book => {
     try {
         const bookDir = path.join(bibleJsonDir, book);
-        const chapterFiles = fs.readdirSync(bookDir); // Files are directly here
+        const chapterFiles = fs.readdirSync(bookDir);
 
         chapterFiles.forEach(chapterFile => {
             if (chapterFile.endsWith('.json')) {
-                const filePath = path.join(bookDir, chapterFile); // Path to the JSON file
+                const filePath = path.join(bookDir, chapterFile);
                 const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
 
-                const verses = data.verses || data;
-
-                if (Array.isArray(verses)) {
-                    combinedData.push(...verses);
-                } else {
-                    console.warn(`Unexpected data format in ${filePath}. Skipping.`);
+                // Function to recursively extract verses from JSON
+                function extractVerses(obj) {
+                    if (Array.isArray(obj) && obj.every(item => typeof item.id === 'string' && typeof item.text === 'string')) {
+                        combinedData.push(...obj);
+                    } else if (typeof obj === 'object') {
+                        for (const key in obj) {
+                            extractVerses(obj[key]);
+                        }
+                    }
                 }
+
+                extractVerses(data);
             }
         });
 

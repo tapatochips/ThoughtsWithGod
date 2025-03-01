@@ -2,9 +2,10 @@ import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getFirestore, Firestore } from "firebase/firestore";
 import { Auth } from "firebase/auth";
 import Constants from 'expo-constants';
+import { setLogLevel } from "firebase/firestore";
 
 
-class Firebase {
+export class Firebase {
   app: FirebaseApp | null = null;
   db: Firestore | null = null; // Initialize db as null
   auth: Auth | null = null;
@@ -51,9 +52,15 @@ class Firebase {
   isAppInitialized() {
     return !!this.app;
   }
+
+  isDbInitialized() {
+    return !!this.db;
+  }
 }
 
 const firebase = new Firebase();
+
+setLogLevel("debug");
 
 console.log("end of firebase config");
 

@@ -24,5 +24,9 @@
     "__tests__/*",
     "**/*.test.*"
   ],
+  "include": [
+    "*.ts", "*.tsx", // Or wherever your .ts files are
+    "combinedBible.d.ts" // Include the declaration file
+  ],
   "extends": "expo/tsconfig.base"
 }

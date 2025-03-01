@@ -3,12 +3,14 @@ import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
 import { Auth } from "firebase/auth";
 import { firebaseInstance } from './firebaseConfig';
+import { User } from 'firebase/auth'
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
     auth: Auth | null;
     db: Firestore | null;
     firebaseInstance: typeof firebaseInstance;
+    user: User | null;
 }
 
 interface FirebaseProviderProps {
@@ -20,6 +22,7 @@ const FirebaseContext = createContext<FirebaseContextType>({
     auth: null,
     db: null,
     firebaseInstance: firebaseInstance,
+    user: null
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
@@ -30,6 +33,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         auth: firebaseInstance.auth,
         db: firebaseInstance.db,
         firebaseInstance: firebaseInstance,
+        user: firebaseInstance.auth?.currentUser || null
     };
 
     return (
