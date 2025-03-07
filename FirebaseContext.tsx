@@ -1,9 +1,8 @@
-import React, { createContext, useContext, ReactNode } from 'react';
+import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
 import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
-import { Auth } from "firebase/auth";
+import { Auth, User, onAuthStateChanged } from "firebase/auth";
 import { firebaseInstance } from './firebaseConfig';
-import { User } from 'firebase/auth'
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
@@ -27,14 +26,41 @@ const FirebaseContext = createContext<FirebaseContextType>({
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
     console.log("FirebaseProvider rendered");
+    const [user, setUser] = useState<User | null>(firebaseInstance.auth?.currentUser || null);
+
+    useEffect(() => {
+        if (!firebaseInstance.auth) {
+            console.log("Auth not initialized in FirebaseProvider");
+            return;
+        }
+
+        console.log("Setting up auth state listener");
+        const unsubscribe = onAuthStateChanged(firebaseInstance.auth, (firebaseUser) => {
+            console.log("Auth state changed:", firebaseUser?.email);
+            setUser(firebaseUser);
+        });
+
+        // Clean up listener on unmount
+        return () => {
+            console.log("Cleaning up auth state listener");
+            unsubscribe();
+        };
+    }, [firebaseInstance.auth]);
 
     const value: FirebaseContextType = {
         app: firebaseInstance.app,
         auth: firebaseInstance.auth,
         db: firebaseInstance.db,
         firebaseInstance: firebaseInstance,
-        user: firebaseInstance.auth?.currentUser || null
+        user: user
     };
+
+    console.log("FirebaseProvider value:", { 
+        appInitialized: !!value.app, 
+        authInitialized: !!value.auth, 
+        dbInitialized: !!value.db,
+        userEmail: value.user?.email
+    });
 
     return (
         <FirebaseContext.Provider value={value}>

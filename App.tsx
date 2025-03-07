@@ -7,40 +7,35 @@ import { useFirebase } from './FirebaseContext';
 import { User } from 'firebase/auth';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import ErrorBoundary from './ErrorBoundary'; // Import ErrorBoundary
-
+import ErrorBoundary from './ErrorBoundary';  
 const Stack = createStackNavigator();
 
 const App = () => {
-    const { auth, firebaseInstance } = useFirebase();
-    const [user, setUser] = useState<User | null>(null);
+    const { auth, firebaseInstance, user } = useFirebase();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (firebaseInstance.isAppInitialized() && auth) { // Corrected method name
-            const unsubscribe = auth.onAuthStateChanged(
-                (currentUser: User | null) => {
-                    setUser(currentUser);
-                    setIsLoading(false);
-                },
-                (error) => {
-                    console.error("Auth state change error:", error);
-                    setError("Failed to authenticate");
-                    setIsLoading(false);
-                }
-            );
-            return unsubscribe;
-        } else {
+        // we just need to check if Firebase is initialized
+        if (firebaseInstance.isAppInitialized()) {
             setIsLoading(false);
+        } else {
+            console.log("Waiting for Firebase to initialize...");
+            //add a timeout here in case Firebase never initializes
+            const timeoutId = setTimeout(() => {
+                setError("Firebase initialization timeout");
+                setIsLoading(false);
+            }, 10000); // 10 second timeout
+            
+            return () => clearTimeout(timeoutId);
         }
-    }, [auth, firebaseInstance]);
+    }, [firebaseInstance]);
 
     if (isLoading) {
         return (
             <View style={styles.container}>
                 <ActivityIndicator />
-                <Text>Loading Authentication...</Text>
+                <Text>Loading Application...</Text>
             </View>
         );
     }
@@ -59,9 +54,7 @@ const App = () => {
                 <Stack.Navigator>
                     {user ? (
                         <>
-                            <Stack.Screen name="VerseDisplay">
-                                {(props) => <VerseDisplay {...props} user={user} />}
-                            </Stack.Screen>
+                            <Stack.Screen name="VerseDisplay" component={VerseDisplay} />
                             <Stack.Screen name="Favorites" component={FavoritesScreen} />
                         </>
                     ) : (

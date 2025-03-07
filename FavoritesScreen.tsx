@@ -5,7 +5,7 @@ import { collection, onSnapshot, doc, deleteDoc, setDoc } from 'firebase/firesto
 import RenderHtml from 'react-native-render-html';
 import { useFirebase } from './FirebaseContext';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
-import { auth } from './firebaseReactNative';
+import { auth } from './firebaseReactNative'; 
 
 interface Verse {
     id: string;
@@ -23,25 +23,26 @@ interface FavoritesScreenProps {
 
 const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
     const { width } = useWindowDimensions();
-    const { user } = useFirebase();
+    const { user: contextUser } = useFirebase();
+    console.log('favorites screen user: ', contextUser);
+    console.log('fav screen auth user: ', auth?.currentUser);
+    
+    //use the auth.currentUser as a fallback if contextUser is null
+    const effectiveUser = contextUser || auth?.currentUser;
+    
     const [favorites, setFavorites] = useState<Verse[]>([]);
     const [loading, setLoading] = useState(true);
 
-    console.log("favorites screen user: ", user);
-    console.log("fav screen auth user: ", auth?.currentUser);
-
-    const currentUser = user || auth?.currentUser;
-    console.log('fav screen user fallback: ', currentUser);
-
     useEffect(() => {
-        if (!user || !db) {
+        if (!effectiveUser || !db) {
             setFavorites([]);
             setLoading(false);
+            console.log('No user or database available');
             return;
         }
-
-        const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
-        console.log('Fetching favorites from:', `users/${user.uid}/favorites`);
+        
+        console.log('Fetching favorites for user: ', effectiveUser.uid);
+        const favoritesCollection = collection(db, `users/${effectiveUser.uid}/favorites`);
 
         const unsubscribe = onSnapshot(
             favoritesCollection, 
@@ -65,14 +66,13 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
         );
 
         return unsubscribe;
-    }, [currentUser]);
+    }, [effectiveUser]);
 
     const handleRemoveFavorite = async (verseId: string) => {
-        if (!user || !db) return;
+        if (!effectiveUser || !db) return;
         
         try {
-            // Using a non-null assertion (!!) since we've already checked if db is null
-            const verseDoc = doc(db, `users/${user.uid}/favorites`, verseId);
+            const verseDoc = doc(db, `users/${effectiveUser.uid}/favorites`, verseId);
             await deleteDoc(verseDoc);
             console.log('Removed favorite:', verseId);
         } catch (error) {
@@ -81,15 +81,15 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
     };
 
     const handleEditNote = async (verse: Verse) => {
-        if (!user || !db) return;
+        if (!effectiveUser || !db) return;
         
         Alert.prompt(
             'Edit Note',
-            'Enter a new note for this verse:',
+            'Enter a note for this verse:',
             async (newNote) => {
-                if (newNote !== null && db) {  // Adding an extra check for db here
+                if (newNote !== null && db) {
                     try {
-                        const verseDoc = doc(db, `users/${user.uid}/favorites`, verse.id);
+                        const verseDoc = doc(db, `users/${effectiveUser.uid}/favorites`, verse.id);
                         await setDoc(verseDoc, { ...verse, note: newNote }, { merge: true });
                         console.log('Updated note for:', verse.id);
                     } catch (error) {
@@ -106,12 +106,13 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
         return <Text style={styles.message}>Loading favorites...</Text>;
     }
 
-    if (!user) {
+    if (!effectiveUser) {
         return <Text style={styles.message}>Please log in to view favorites.</Text>;
     }
 
     return (
         <ScrollView style={styles.container}>
+            <Text style={styles.header}>Favorites for {effectiveUser.email}</Text>
             {favorites.length > 0 ? (
                 favorites.map((verse) => (
                     <View key={verse.id} style={styles.verseContainer}>
@@ -164,6 +165,12 @@ const styles = StyleSheet.create({
         padding: 20,
         textAlign: 'center',
         fontSize: 16,
+    },
+    header: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginBottom: 16,
+        textAlign: 'center',
     },
 });
 
