@@ -1,15 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Button, useWindowDimensions, Alert } from 'react-native';
-import verses from './data/combinedBible.json';
+import { View, Text, StyleSheet, Button, useWindowDimensions } from 'react-native';
 import versesData from './data/combinedBible.json';
-//console.log('versesData: ', versesData);
 import RenderHtml from 'react-native-render-html';
 import { User } from "firebase/auth";
-import { db, firebaseInstance } from "./firebaseConfig";
+import { db } from "./firebaseConfig";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
-import { NavigationProp, ParamListBase } from '@react-navigation/native';
-
-
 
 interface Verse {
     id?: string;
@@ -46,23 +41,28 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user, navigation }) => {
           } finally {
             setLoading(false);
           }
-    }, []); // Empty dependency array for initial load
+    }, []);
 
     useEffect(() => {
-        if (user && currentVerse && currentVerse.id && firebaseInstance.isDbInitialized() && db) {
-            const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`
-            const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
-            const verseDocument = doc(favoritesCollection, currentVerse.id);
-
-            const unsubscribe = onSnapshot(verseDocument, (doc: DocumentSnapshot) => {
-                setIsFavorite(doc.exists);
-            });
-
-            return unsubscribe;
-        } else {
+        if (!user || !currentVerse || !db) {
             setIsFavorite(false);
+            return;
         }
-    }, [user, currentVerse]); // Dependency array with user and currentVerse
+
+        // Create a consistent ID for the verse
+        const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`;
+        
+        const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
+        const verseDocument = doc(favoritesCollection, verseId);
+
+        const unsubscribe = onSnapshot(verseDocument, (docSnapshot: DocumentSnapshot) => {
+            setIsFavorite(docSnapshot.exists());
+        }, (error) => {
+            console.error("Error listening to favorites:", error);
+        });
+
+        return unsubscribe;
+    }, [user, currentVerse]); 
 
     const handleNextVerse = () => {
         if (verses && verses.length > 0) {
@@ -72,19 +72,24 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user, navigation }) => {
     };
 
     const handleFavoritePress = async () => {
-        console.log('user: ', user);
-        console.log('currentVerse: ', currentVerse);
-        if (!user || !currentVerse || !currentVerse.id || !db) return;
+        if (!user || !currentVerse || !db) return;
         
+        // Create a consistent ID for the verse
         const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`;
+        
         const favoritesCollection = collection(db, `users/${user.uid}/favorites`);
-        console.log('fav collection ref: ', favoritesCollection.path);
-        const verseDocument = doc(favoritesCollection, currentVerse.id);
+        const verseDocument = doc(favoritesCollection, verseId);
 
         try {
             if (!isFavorite) {
-              console.log('Adding to favorites:', currentVerse, 'with id:', verseId);
-              await setDoc(verseDocument, { ...currentVerse, id: verseId });
+              // Include the ID in the saved document
+              const verseToSave = { 
+                ...currentVerse,
+                id: verseId
+              };
+              
+              console.log('Adding to favorites:', verseToSave);
+              await setDoc(verseDocument, verseToSave);
               console.log('Favorite added with id:', verseId);
             } else {
               await deleteDoc(verseDocument);
@@ -109,14 +114,17 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ user, navigation }) => {
             {currentVerse ? (
                 <>
                     <RenderHtml source={{ html: currentVerse.text }} contentWidth={width} />
+                    <Text style={styles.verseReference}>
+                        {currentVerse.book_name} {currentVerse.chapter}:{currentVerse.verse}
+                    </Text>
                     <Button title="Next Verse" onPress={handleNextVerse} />
-                    {user && currentVerse && (
+                    {user && (
                         <Button
                             title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
                             onPress={handleFavoritePress}
                         />
                     )}
-                    <Button title="View Favorites" onPress={() => navigation.navigate('Favorites')}></Button>
+                    <Button title="View Favorites" onPress={() => navigation.navigate('Favorites')} />
                 </>
             ) : (
                 <Text>No verse selected yet.</Text>
