@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, StyleSheet, View } from 'react-native';
-import { useFirebase } from './FirebaseContext';
+import { useFirebase } from '../../context/FirebaseContext';
 import { signOut } from 'firebase/auth';
 
 interface LogoutButtonProps {

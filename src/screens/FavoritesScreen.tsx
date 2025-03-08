@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Button, useWindowDimensions, Alert } from 'react-native';
-import { db } from './firebaseConfig';
+import { db } from '../services/firebase/firebaseConfig';
 import { collection, onSnapshot, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import RenderHtml from 'react-native-render-html';
-import { useFirebase } from './FirebaseContext';
+import { useFirebase } from '../context/FirebaseContext';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
-import { auth } from './firebaseReactNative'; 
+import { auth } from '../services/firebase/firebaseReactNative'; 
 
 interface Verse {
     id: string;

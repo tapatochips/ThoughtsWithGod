@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Button, useWindowDimensions } from 'react-native';
-import versesData from './data/combinedBible.json';
+import versesData from '../data/combinedBible.json';
 import RenderHtml from 'react-native-render-html';
-import { db } from "./firebaseConfig";
+import { db } from "../services/firebase/firebaseConfig";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
-import { useFirebase } from './FirebaseContext';
+import { useFirebase } from '../context/FirebaseContext';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
-import LogoutButton from './LogoutButton';
+import LogoutButton from '../components/auth/LogoutButton';
 
 interface Verse {
     id?: string;

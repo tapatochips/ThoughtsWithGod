@@ -27,6 +27,6 @@
   "include": [
     "*.ts", "*.tsx", // Or wherever your .ts files are
     "combinedBible.d.ts" // Include the declaration file
-  ],
+, "src/services/firebase/firebaseReactNative.tsx", "App.tsx", "src/index.tsx"  ],
   "extends": "expo/tsconfig.base"
 }

@@ -10,7 +10,8 @@ import {
   TouchableOpacity,
   Modal
 } from 'react-native';
-import { useFirebase } from './FirebaseContext';
+import { useFirebase } from '../context/FirebaseContext';
+//import { db } from './src/services/firebaseConfig';
 import { 
   collection, 
   addDoc, 

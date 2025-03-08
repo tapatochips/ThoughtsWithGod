@@ -2,7 +2,7 @@ import React, { createContext, useContext, ReactNode, useState, useEffect } from
 import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
 import { Auth, User, onAuthStateChanged } from "firebase/auth";
-import { firebaseInstance } from './firebaseConfig';
+import { firebaseInstance } from '../services/firebase/firebaseConfig';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;

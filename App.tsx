@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
-import VerseDisplay from './VerseDisplay';
-import AuthScreen from './AuthScreen';
-import FavoritesScreen from './FavoritesScreen';
-import PrayerBoard from './PrayerBoard';
-import { useFirebase } from './FirebaseContext';
+import VerseDisplay from './src/screens/VerseDisplay';
+import AuthScreen from './src/screens/AuthScreen';
+import FavoritesScreen from './src/screens/FavoritesScreen';
+import PrayerBoard from './src/screens/PrayerBoard';
+import { useFirebase } from './src/context/FirebaseContext';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import ErrorBoundary from './ErrorBoundary';
+import ErrorBoundary from './src/components/common/ErrorBoundary';
 
 const Stack = createStackNavigator();
 
