@@ -6,6 +6,7 @@ import { db } from "./firebaseConfig";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
 import { useFirebase } from './FirebaseContext';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
+import LogoutButton from './LogoutButton';
 
 interface Verse {
     id?: string;
@@ -29,11 +30,8 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
     
-    //use either db from props or from context
+    // Use either db from props or from context
     const effectiveDb = db || contextDb;
-
-    console.log("VerseDisplay user:", user?.email);
-    console.log("VerseDisplay db initialized:", !!effectiveDb);
 
     useEffect(() => {
         try {
@@ -56,17 +54,14 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
             return;
         }
 
-        //create a consistent ID for the verse
+        // Create a consistent ID for the verse
         const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`;
         
-        console.log(`Checking if verse ${verseId} is favorite for user ${user.uid}`);
         const favoritesCollection = collection(effectiveDb, `users/${user.uid}/favorites`);
         const verseDocument = doc(favoritesCollection, verseId);
 
         const unsubscribe = onSnapshot(verseDocument, (docSnapshot: DocumentSnapshot) => {
-            const exists = docSnapshot.exists();
-            console.log(`Verse ${verseId} favorite status:`, exists);
-            setIsFavorite(exists);
+            setIsFavorite(docSnapshot.exists());
         }, (error) => {
             console.error("Error listening to favorites:", error);
         });
@@ -87,7 +82,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
             return;
         }
         
-        //create a consistent ID for the verse
+        // Create a consistent ID for the verse
         const verseId = currentVerse.id || `${currentVerse.book_name}-${currentVerse.chapter}-${currentVerse.verse}`;
         
         try {
@@ -95,13 +90,12 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
             const verseDocument = doc(favoritesCollection, verseId);
 
             if (!isFavorite) {
-              //include the ID in the saved document
+              // Include the ID in the saved document
               const verseToSave = { 
                 ...currentVerse,
                 id: verseId
               };
               
-              console.log('Adding to favorites:', verseId);
               await setDoc(verseDocument, verseToSave);
               console.log('Favorite added with id:', verseId);
             } else {
@@ -113,6 +107,10 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
         }
     };
 
+    const navigateToPrayerBoard = () => {
+        navigation.navigate('PrayerBoard');
+    };
+
     if (loading) {
         return <Text>Loading Verse...</Text>;
     }
@@ -122,36 +120,61 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     }
 
     return (
-        <View style={styles.verseContainer}>
-            {currentVerse ? (
-                <>
-                    <RenderHtml source={{ html: currentVerse.text }} contentWidth={width} />
-                    <Text style={styles.verseReference}>
-                        {currentVerse.book_name} {currentVerse.chapter}:{currentVerse.verse}
-                    </Text>
-                    <Button title="Next Verse" onPress={handleNextVerse} />
-                    {user && (
-                        <Button
-                            title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
-                            onPress={handleFavoritePress}
-                        />
-                    )}
-                    <Button 
-                        title="View Favorites" 
-                        onPress={() => navigation.navigate('Favorites')} 
-                    />
-                </>
-            ) : (
-                <Text>No verse selected yet.</Text>
-            )}
+        <View style={styles.container}>
+            <View style={styles.header}>
+                <Text style={styles.welcomeText}>
+                    Welcome, {user?.email?.split('@')[0] || 'Guest'}
+                </Text>
+                <LogoutButton />
+            </View>
+            
+            <View style={styles.verseContainer}>
+                {currentVerse ? (
+                    <>
+                        <RenderHtml source={{ html: currentVerse.text }} contentWidth={width} />
+                        <Text style={styles.verseReference}>
+                            {currentVerse.book_name} {currentVerse.chapter}:{currentVerse.verse}
+                        </Text>
+                        <Button title="Next Verse" onPress={handleNextVerse} />
+                        {user && (
+                            <Button
+                                title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+                                onPress={handleFavoritePress}
+                            />
+                        )}
+                        <View style={styles.buttonGroup}>
+                            <Button title="View Favorites" onPress={() => navigation.navigate('Favorites')} />
+                            <Button title="Prayer Board" onPress={navigateToPrayerBoard} />
+                        </View>
+                    </>
+                ) : (
+                    <Text>No verse selected yet.</Text>
+                )}
+            </View>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#f0f0f0',
+    },
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 10,
+        backgroundColor: '#f8f9fa',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e9ecef',
+    },
+    welcomeText: {
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
     verseContainer: {
         padding: 20,
-        backgroundColor: '#f0f0f0',
         alignItems: 'center',
         justifyContent: 'center',
         flex: 1,
@@ -169,6 +192,10 @@ const styles = StyleSheet.create({
         fontStyle: 'italic',
         marginBottom: 20,
         textAlign: 'center',
+    },
+    buttonGroup: {
+        marginTop: 20,
+        width: '100%',
     },
 });
 
