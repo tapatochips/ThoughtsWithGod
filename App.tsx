@@ -1,94 +1,222 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, Text, View, ActivityIndicator, AppState, AppStateStatus } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+
+// Screens
 import VerseDisplay from './src/screens/VerseDisplay';
 import AuthScreen from './src/screens/AuthScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import PrayerBoard from './src/screens/PrayerBoard';
-import { useFirebase } from './src/context/FirebaseContext';
-import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import ProfileSetup from './src/screens/ProfileSetup';
+
+// Providers
+import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
+import { ThemeProvider, useTheme } from './src/context/ThemeProvider';
 import ErrorBoundary from './src/components/common/ErrorBoundary';
+
+// Mock notifications
+import { 
+  registerForPushNotificationsAsync, 
+  scheduleDailyVerseReminder,
+  setupNotificationListener,
+  setupNotificationResponseListener,
+  cancelAllScheduledNotifications
+} from './src/services/notifications';
 
 const Stack = createStackNavigator();
 
-const App = () => {
-    const { firebaseInstance, user } = useFirebase();
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+const AppContent = () => {
+  const { firebaseInstance, user, userProfile, isLoading } = useFirebase();
+  const { theme } = useTheme();
+  const [error, setError] = useState<string | null>(null);
+  const appState = useRef(AppState.currentState);
+  const notificationListener = useRef<any>();
+  const responseListener = useRef<any>();
 
-    useEffect(() => {
-        if (firebaseInstance.isAppInitialized()) {
-            setIsLoading(false);
-        } else {
-            console.log("Waiting for Firebase to initialize...");
-            const timeoutId = setTimeout(() => {
-                setError("Firebase initialization timeout");
-                setIsLoading(false);
-            }, 10000);
-            
-            return () => clearTimeout(timeoutId);
-        }
-    }, [firebaseInstance]);
+  // Setup notification listeners
+  useEffect(() => {
+    if (user) {
+      // Register for notifications
+      registerForPushNotificationsAsync().then(token => {
+        console.log('Push token:', token);
+      });
 
-    if (isLoading) {
-        return (
-            <View style={styles.container}>
-                <ActivityIndicator />
-                <Text>Loading Application...</Text>
-            </View>
-        );
+      // Set up notification listeners
+      notificationListener.current = setupNotificationListener(notification => {
+        console.log('Notification received:', notification);
+      });
+
+      responseListener.current = setupNotificationResponseListener(response => {
+        console.log('Notification response received:', response);
+        // Handle navigation if needed based on notification content
+      });
+
+      // Schedule daily reminder if user has enabled it
+      scheduleDailyVerseReminder(user.uid);
     }
 
-    if (error) {
-        return (
-            <View style={styles.container}>
-                <Text>{error}</Text>
-            </View>
-        );
-    }
+    return () => {
+      // Clean up listeners when component unmounts
+      if (notificationListener.current) {
+        notificationListener.current.remove();
+      }
+      if (responseListener.current) {
+        responseListener.current.remove();
+      }
+    };
+  }, [user, userProfile?.preferences?.reminders, userProfile?.preferences?.reminderTime]);
 
+  // Listen for app state changes to reschedule notifications
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
+      if (
+        appState.current.match(/inactive|background/) &&
+        nextAppState === "active" && 
+        user
+      ) {
+        console.log("App has come to the foreground!");
+        // Re-schedule notifications when app comes to foreground
+        scheduleDailyVerseReminder(user.uid);
+      }
+
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [user]);
+
+  // Firebase initialization check
+  useEffect(() => {
+    if (firebaseInstance.isAppInitialized()) {
+      console.log("Firebase initialized successfully");
+    } else {
+      console.log("Waiting for Firebase to initialize...");
+      const timeoutId = setTimeout(() => {
+        setError("Firebase initialization timeout");
+      }, 10000);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [firebaseInstance]);
+
+  if (isLoading) {
     return (
-        <ErrorBoundary>
-            <NavigationContainer>
-                <Stack.Navigator>
-                    {user ? (
-                        <>
-                            <Stack.Screen 
-                                name="VerseDisplay" 
-                                component={VerseDisplay} 
-                                options={{ title: "Daily Verse" }}
-                            />
-                            <Stack.Screen 
-                                name="Favorites" 
-                                component={FavoritesScreen} 
-                                options={{ title: "My Favorites" }}
-                            />
-                            <Stack.Screen 
-                                name="PrayerBoard" 
-                                component={PrayerBoard} 
-                                options={{ title: "Prayer Board" }}
-                            />
-                        </>
-                    ) : (
-                        <Stack.Screen 
-                            name="Auth" 
-                            component={AuthScreen}
-                            options={{ title: "Sign In" }}
-                        />
-                    )}
-                </Stack.Navigator>
-            </NavigationContainer>
-        </ErrorBoundary>
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator color={theme.colors.primary} size="large" />
+        <Text style={{ color: theme.colors.text, marginTop: 10 }}>Loading Application...</Text>
+      </View>
     );
+  }
+
+  if (error) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <Text style={{ color: theme.colors.text }}>{error}</Text>
+      </View>
+    );
+  }
+
+// Define the navigation theme based on our custom theme
+const navigationTheme = {
+    dark: theme.name === 'dark',
+    colors: {
+      primary: theme.colors.primary,
+      background: theme.colors.background,
+      card: theme.colors.card,
+      text: theme.colors.text,
+      border: theme.colors.border,
+      notification: theme.colors.primary,
+    },
+    //Using exact string literals for fontWeight as required by the Theme type
+    fonts: {
+      regular: {
+        fontFamily: 'System',
+        fontWeight: 'normal', // Must be one of the allowed string literals
+      },
+      medium: {
+        fontFamily: 'System',
+        fontWeight: '500', // Must be one of the allowed string literals
+      },
+      bold: {
+        fontFamily: 'System',
+        fontWeight: 'bold', // Must be one of the allowed string literals
+      },
+      heavy: {
+        fontFamily: 'System',
+        fontWeight: '900', // Must be one of the allowed string literals
+      },
+    },
+  };
+
+  return (
+    <NavigationContainer theme={navigationTheme}>
+      <Stack.Navigator
+        screenOptions={{
+          headerStyle: {
+            backgroundColor: theme.colors.card,
+          },
+          headerTintColor: theme.colors.text,
+          headerTitleStyle: {
+            fontSize: theme.fontSize.lg,
+          },
+        }}
+      >
+        {user ? (
+          <>
+            <Stack.Screen 
+              name="VerseDisplay" 
+              component={VerseDisplay} 
+              options={{ title: "Daily Verse" }}
+            />
+            <Stack.Screen 
+              name="Favorites" 
+              component={FavoritesScreen} 
+              options={{ title: "My Favorites" }}
+            />
+            <Stack.Screen 
+              name="PrayerBoard" 
+              component={PrayerBoard} 
+              options={{ title: "Prayer Board" }}
+            />
+            <Stack.Screen 
+              name="ProfileSetup" 
+              component={ProfileSetup} 
+              options={{ title: "Profile Settings" }}
+            />
+          </>
+        ) : (
+          <Stack.Screen 
+            name="Auth" 
+            component={AuthScreen}
+            options={{ title: "Sign In" }}
+          />
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+};
+
+const App = () => {
+  return (
+    <ErrorBoundary>
+      <FirebaseProvider>
+        <ThemeProvider>
+          <AppContent />
+        </ThemeProvider>
+      </FirebaseProvider>
+    </ErrorBoundary>
+  );
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#fff',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
 
 export default App;

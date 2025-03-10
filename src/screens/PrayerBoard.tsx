@@ -6,12 +6,13 @@ import {
   TextInput, 
   Button, 
   FlatList, 
-  Alert, 
+  Alert,
   TouchableOpacity,
-  Modal
+  Modal,
+  ScrollView
 } from 'react-native';
 import { useFirebase } from '../context/FirebaseContext';
-//import { db } from './src/services/firebaseConfig';
+import { useTheme } from '../context/ThemeProvider';
 import { 
   collection, 
   addDoc, 
@@ -25,7 +26,6 @@ import {
   arrayUnion,
   arrayRemove,
   getDoc,
-  setDoc,
   getDocs
 } from 'firebase/firestore';
 
@@ -34,6 +34,7 @@ interface Comment {
   text: string;
   userId: string;
   userEmail: string;
+  username?: string;
   createdAt: any;
 }
 
@@ -42,6 +43,7 @@ interface PrayerRequest {
   text: string;
   userId: string;
   userEmail: string;
+  username?: string;
   createdAt: any;
   answered: boolean;
   likedBy: string[];
@@ -49,7 +51,8 @@ interface PrayerRequest {
 }
 
 const PrayerBoard: React.FC = () => {
-  const { user, db } = useFirebase();
+  const { user, db, userProfile } = useFirebase();
+  const { theme } = useTheme();
   const [newPrayer, setNewPrayer] = useState('');
   const [prayers, setPrayers] = useState<PrayerRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +96,7 @@ const PrayerBoard: React.FC = () => {
   }, [db, user]);
 
   useEffect(() => {
-    //load comments when a prayer is selected
+    // Load comments when a prayer is selected
     if (!db || !selectedPrayer) {
       setComments([]);
       return;
@@ -132,6 +135,7 @@ const PrayerBoard: React.FC = () => {
         text: newPrayer.trim(),
         userId: user.uid,
         userEmail: user.email,
+        username: userProfile?.username || user.email?.split('@')[0] || 'Anonymous',
         createdAt: Timestamp.now(),
         answered: false,
         likedBy: [],
@@ -161,7 +165,7 @@ const PrayerBoard: React.FC = () => {
   const handleDeletePrayer = async (prayerId: string, prayerUserId: string) => {
     if (!user || !db) return;
     
-    //only allow deletion if the current user created the prayer request
+    // Only allow deletion if the current user created the prayer request
     if (user.uid !== prayerUserId) {
       Alert.alert("Permission Denied", "You can only delete your own prayer requests.");
       return;
@@ -177,7 +181,7 @@ const PrayerBoard: React.FC = () => {
           style: "destructive", 
           onPress: async () => {
             try {
-              //first delete all comments
+              // First delete all comments
               const commentsCollection = collection(db, `prayers/${prayerId}/comments`);
               const commentsSnapshot = await getDocs(commentsCollection);
               const deletePromises = commentsSnapshot.docs.map(commentDoc => 
@@ -185,7 +189,7 @@ const PrayerBoard: React.FC = () => {
               );
               await Promise.all(deletePromises);
               
-              //then delete the prayer request
+              // Then delete the prayer request
               const prayerDoc = doc(db, 'prayers', prayerId);
               await deleteDoc(prayerDoc);
             } catch (error) {
@@ -204,16 +208,16 @@ const PrayerBoard: React.FC = () => {
     try {
       const prayerDoc = doc(db, 'prayers', prayer.id);
       
-      //check if user already liked this prayer
+      // Check if user already liked this prayer
       const isLiked = prayer.likedBy.includes(user.uid);
       
       if (isLiked) {
-        //unlike
+        // Unlike
         await updateDoc(prayerDoc, {
           likedBy: arrayRemove(user.uid)
         });
       } else {
-        //like
+        // Like
         await updateDoc(prayerDoc, {
           likedBy: arrayUnion(user.uid)
         });
@@ -234,15 +238,16 @@ const PrayerBoard: React.FC = () => {
     try {
       const commentsCollection = collection(db, `prayers/${selectedPrayer.id}/comments`);
       
-      //add the comment
+      // Add the comment
       await addDoc(commentsCollection, {
         text: newComment.trim(),
         userId: user.uid,
         userEmail: user.email,
+        username: userProfile?.username || user.email?.split('@')[0] || 'Anonymous',
         createdAt: Timestamp.now()
       });
       
-      //update comment count on the prayer document
+      // Update comment count on the prayer document
       const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
       await updateDoc(prayerDoc, {
         commentCount: (selectedPrayer.commentCount || 0) + 1
@@ -258,18 +263,18 @@ const PrayerBoard: React.FC = () => {
   const handleDeleteComment = async (commentId: string, commentUserId: string) => {
     if (!user || !db || !selectedPrayer) return;
     
-    //only allow deletion if the current user created the comment
+    // Only allow deletion if the current user created the comment
     if (user.uid !== commentUserId) {
       Alert.alert("Permission Denied", "You can only delete your own comments.");
       return;
     }
 
     try {
-      //delete the comment
+      // Delete the comment
       const commentDoc = doc(db, `prayers/${selectedPrayer.id}/comments`, commentId);
       await deleteDoc(commentDoc);
       
-      //update comment count on the prayer document
+      // Update comment count on the prayer document
       const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
       await updateDoc(prayerDoc, {
         commentCount: Math.max((selectedPrayer.commentCount || 0) - 1, 0)
@@ -281,54 +286,67 @@ const PrayerBoard: React.FC = () => {
 
   if (!user) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.message}>Please log in to use the Prayer Board.</Text>
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <Text style={{ color: theme.colors.text }}>Please log in to use the Prayer Board.</Text>
       </View>
     );
   }
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.message}>Loading Prayer Board...</Text>
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <Text style={{ color: theme.colors.text }}>Loading Prayer Board...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Prayer Board</Text>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <Text style={[styles.title, { color: theme.colors.text }]}>Prayer Board</Text>
       
-      <View style={styles.inputContainer}>
+      <View style={[styles.inputContainer, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: theme.colors.text }]}
           value={newPrayer}
           onChangeText={setNewPrayer}
           placeholder="Enter your prayer request..."
+          placeholderTextColor={theme.colors.secondary}
           multiline
         />
-        <Button title="Add Prayer" onPress={handleAddPrayer} />
+        <Button 
+          title="Add Prayer" 
+          onPress={handleAddPrayer}
+          color={theme.colors.primary}
+        />
       </View>
       
       <FlatList
         data={prayers}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <View style={[styles.prayerItem, item.answered && styles.answeredPrayer]}>
-            <Text style={styles.prayerText}>{item.text}</Text>
-            <Text style={styles.prayerMeta}>
-              Posted by: {item.userEmail?.split('@')[0]} 
+          <View style={[
+            styles.prayerItem, 
+            { 
+              backgroundColor: theme.colors.card, 
+              borderColor: theme.colors.border
+            },
+            item.answered && styles.answeredPrayer
+          ]}>
+            <Text style={[styles.prayerText, { color: theme.colors.text }]}>{item.text}</Text>
+            <Text style={[styles.prayerMeta, { color: theme.colors.secondary }]}>
+              Posted by: {item.username || item.userEmail?.split('@')[0]} 
               {item.answered ? ' (Answered)' : ''}
             </Text>
             
-            <View style={styles.interactionBar}>
+            <View style={[styles.interactionBar, { borderTopColor: theme.colors.border }]}>
               <TouchableOpacity 
                 style={styles.interactionButton} 
                 onPress={() => handleToggleLike(item)}
               >
                 <Text style={[
                   styles.interactionText,
-                  item.likedBy.includes(user.uid) && styles.likedText
+                  { color: theme.colors.secondary },
+                  item.likedBy.includes(user.uid) && { color: '#e91e63' }
                 ]}>
                   ❤️ {item.likedBy.length}
                 </Text>
@@ -338,7 +356,7 @@ const PrayerBoard: React.FC = () => {
                 style={styles.interactionButton}
                 onPress={() => openComments(item)}
               >
-                <Text style={styles.interactionText}>
+                <Text style={[styles.interactionText, { color: theme.colors.secondary }]}>
                   💬 {item.commentCount || 0}
                 </Text>
               </TouchableOpacity>
@@ -349,6 +367,7 @@ const PrayerBoard: React.FC = () => {
                 <Button
                   title={item.answered ? "Mark Unanswered" : "Mark Answered"}
                   onPress={() => handleToggleAnswered(item.id, item.answered)}
+                  color={theme.colors.primary}
                 />
                 <Button
                   title="Delete"
@@ -360,7 +379,9 @@ const PrayerBoard: React.FC = () => {
           </View>
         )}
         ListEmptyComponent={
-          <Text style={styles.message}>No prayer requests yet. Be the first to add one!</Text>
+          <Text style={[styles.message, { color: theme.colors.text }]}>
+            No prayer requests yet. Be the first to add one!
+          </Text>
         }
       />
       
@@ -371,17 +392,21 @@ const PrayerBoard: React.FC = () => {
         visible={modalVisible}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Comments</Text>
-            <Button title="Close" onPress={() => setModalVisible(false)} />
+        <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
+            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
+            <Button 
+              title="Close" 
+              onPress={() => setModalVisible(false)}
+              color={theme.colors.primary}
+            />
           </View>
           
           {selectedPrayer && (
-            <View style={styles.originalPrayer}>
-              <Text style={styles.originalPrayerText}>{selectedPrayer.text}</Text>
-              <Text style={styles.prayerMeta}>
-                Posted by: {selectedPrayer.userEmail?.split('@')[0]}
+            <View style={[styles.originalPrayer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+              <Text style={[styles.originalPrayerText, { color: theme.colors.text }]}>{selectedPrayer.text}</Text>
+              <Text style={[styles.prayerMeta, { color: theme.colors.secondary }]}>
+                Posted by: {selectedPrayer.username || selectedPrayer.userEmail?.split('@')[0]}
                 {selectedPrayer.answered ? ' (Answered)' : ''}
               </Text>
             </View>
@@ -391,36 +416,43 @@ const PrayerBoard: React.FC = () => {
             data={comments}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
-              <View style={styles.commentItem}>
+              <View style={[styles.commentItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
                 <View style={styles.commentHeader}>
-                  <Text style={styles.commentAuthor}>
-                    {item.userEmail?.split('@')[0]}:
+                  <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
+                    {item.username || item.userEmail?.split('@')[0]}:
                   </Text>
                   {user.uid === item.userId && (
                     <TouchableOpacity
                       onPress={() => handleDeleteComment(item.id, item.userId)}
                     >
-                      <Text style={styles.deleteCommentText}>Delete</Text>
+                      <Text style={{ color: '#dc3545' }}>Delete</Text>
                     </TouchableOpacity>
                   )}
                 </View>
-                <Text style={styles.commentText}>{item.text}</Text>
+                <Text style={[styles.commentText, { color: theme.colors.text }]}>{item.text}</Text>
               </View>
             )}
             ListEmptyComponent={
-              <Text style={styles.message}>No comments yet. Be the first to comment!</Text>
+              <Text style={[styles.message, { color: theme.colors.text }]}>
+                No comments yet. Be the first to comment!
+              </Text>
             }
           />
           
-          <View style={styles.commentInputContainer}>
+          <View style={[styles.commentInputContainer, { borderTopColor: theme.colors.border }]}>
             <TextInput
-              style={styles.commentInput}
+              style={[styles.commentInput, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
               value={newComment}
               onChangeText={setNewComment}
               placeholder="Write a comment..."
+              placeholderTextColor={theme.colors.secondary}
               multiline
             />
-            <Button title="Post" onPress={handleAddComment} />
+            <Button 
+              title="Post" 
+              onPress={handleAddComment}
+              color={theme.colors.primary}
+            />
           </View>
         </View>
       </Modal>
@@ -432,7 +464,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f8f9fa',
   },
   title: {
     fontSize: 24,
@@ -443,9 +474,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#ced4da',
     borderRadius: 8,
-    backgroundColor: 'white',
   },
   input: {
     padding: 12,
@@ -453,12 +482,10 @@ const styles = StyleSheet.create({
     minHeight: 80,
   },
   prayerItem: {
-    backgroundColor: 'white',
     padding: 16,
     borderRadius: 8,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#ced4da',
   },
   answeredPrayer: {
     backgroundColor: '#e8f4f8',
@@ -470,13 +497,11 @@ const styles = StyleSheet.create({
   },
   prayerMeta: {
     fontSize: 12,
-    color: '#6c757d',
     marginBottom: 8,
   },
   interactionBar: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: '#eeeeee',
     paddingTop: 8,
     marginBottom: 8,
   },
@@ -485,10 +510,6 @@ const styles = StyleSheet.create({
   },
   interactionText: {
     fontSize: 14,
-    color: '#6c757d',
-  },
-  likedText: {
-    color: '#e91e63',
   },
   prayerActions: {
     flexDirection: 'row',
@@ -498,40 +519,38 @@ const styles = StyleSheet.create({
     padding: 20,
     textAlign: 'center',
     fontSize: 16,
-    color: '#6c757d',
   },
   modalContainer: {
     flex: 1,
     padding: 16,
-    backgroundColor: '#f8f9fa',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    borderBottomWidth: 1,
+    paddingBottom: 8,
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
   },
   originalPrayer: {
-    backgroundColor: '#e9ecef',
     padding: 16,
     borderRadius: 8,
     marginBottom: 16,
+    borderWidth: 1,
   },
   originalPrayerText: {
     fontSize: 16,
     fontStyle: 'italic',
   },
   commentItem: {
-    backgroundColor: 'white',
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#ced4da',
   },
   commentHeader: {
     flexDirection: 'row',
@@ -545,21 +564,14 @@ const styles = StyleSheet.create({
   commentText: {
     fontSize: 14,
   },
-  deleteCommentText: {
-    color: '#dc3545',
-    fontSize: 12,
-  },
   commentInputContainer: {
     borderTopWidth: 1,
-    borderTopColor: '#ced4da',
     paddingTop: 16,
     marginTop: 8,
   },
   commentInput: {
-    backgroundColor: 'white',
     padding: 12,
     borderWidth: 1,
-    borderColor: '#ced4da',
     borderRadius: 8,
     fontSize: 16,
     minHeight: 60,

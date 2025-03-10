@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Button, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Button, TouchableOpacity, useWindowDimensions } from 'react-native';
 import versesData from '../data/combinedBible.json';
 import RenderHtml from 'react-native-render-html';
 import { db } from "../services/firebase/firebaseConfig";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
 import { useFirebase } from '../context/FirebaseContext';
+import { useTheme } from '../context/ThemeProvider';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import LogoutButton from '../components/auth/LogoutButton';
 
@@ -24,7 +25,8 @@ interface VerseDisplayProps {
 
 const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     const { width } = useWindowDimensions();
-    const { user, db: contextDb } = useFirebase();
+    const { user, userProfile, db: contextDb } = useFirebase();
+    const { theme } = useTheme();
     const [currentVerse, setCurrentVerse] = useState<Verse | null>(null);
     const [verses, setVerses] = useState<Verse[] | null>(null);
     const [loading, setLoading] = useState(true);
@@ -107,48 +109,138 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
         }
     };
 
-    const navigateToPrayerBoard = () => {
-        navigation.navigate('PrayerBoard');
+    const navigateToProfile = () => {
+        navigation.navigate('ProfileSetup');
+    };
+
+    // Get font size based on user preference
+    const getFontSize = () => {
+        const fontSizeName = userProfile?.preferences?.fontSize || 'medium';
+        switch (fontSizeName) {
+            case 'small':
+                return theme.fontSize.sm;
+            case 'large':
+                return theme.fontSize.lg;
+            default:
+                return theme.fontSize.md;
+        }
+    };
+
+    // Create tagged HTML for the verse text using theme font size
+    const getTaggedVerseText = () => {
+        if (!currentVerse) return '';
+        
+        const fontSize = getFontSize();
+        
+        return currentVerse.text.replace(
+            /<p>/g, 
+            `<p style="font-size: ${fontSize}px; line-height: ${fontSize * 1.5}px; color: ${theme.colors.text};">`
+        );
     };
 
     if (loading) {
-        return <Text>Loading Verse...</Text>;
+        return (
+            <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+                <Text style={{ color: theme.colors.text }}>Loading Verse...</Text>
+            </View>
+        );
     }
 
     if (!verses || verses.length === 0) {
-        return <Text>No verses found.</Text>;
+        return (
+            <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+                <Text style={{ color: theme.colors.text }}>No verses found.</Text>
+            </View>
+        );
     }
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.welcomeText}>
-                    Welcome, {user?.email?.split('@')[0] || 'Guest'}
-                </Text>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            <View style={[styles.header, { 
+                backgroundColor: theme.colors.card,
+                borderBottomColor: theme.colors.border 
+            }]}>
+                <TouchableOpacity 
+                    style={styles.profileButton} 
+                    onPress={navigateToProfile}
+                >
+                    <Text style={[styles.welcomeText, { color: theme.colors.text }]}>
+                        {userProfile?.username || user?.email?.split('@')[0] || 'Guest'}
+                    </Text>
+                </TouchableOpacity>
                 <LogoutButton />
             </View>
             
             <View style={styles.verseContainer}>
                 {currentVerse ? (
                     <>
-                        <RenderHtml source={{ html: currentVerse.text }} contentWidth={width} />
-                        <Text style={styles.verseReference}>
+                        <RenderHtml 
+                            source={{ html: getTaggedVerseText() }} 
+                            contentWidth={width} 
+                            tagsStyles={{
+                                p: { color: theme.colors.text }
+                            }}
+                        />
+                        <Text style={[styles.verseReference, { 
+                            color: theme.colors.secondary,
+                            fontSize: theme.fontSize.sm 
+                        }]}>
                             {currentVerse.book_name} {currentVerse.chapter}:{currentVerse.verse}
                         </Text>
-                        <Button title="Next Verse" onPress={handleNextVerse} />
-                        {user && (
-                            <Button
-                                title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
-                                onPress={handleFavoritePress}
-                            />
-                        )}
-                        <View style={styles.buttonGroup}>
-                            <Button title="View Favorites" onPress={() => navigation.navigate('Favorites')} />
-                            <Button title="Prayer Board" onPress={navigateToPrayerBoard} />
+                        
+                        <View style={styles.actionButtonContainer}>
+                            <TouchableOpacity 
+                                style={[styles.actionButton, { backgroundColor: theme.colors.primary }]} 
+                                onPress={handleNextVerse}
+                            >
+                                <Text style={styles.actionButtonText}>Next Verse</Text>
+                            </TouchableOpacity>
+                            
+                            {user && (
+                                <TouchableOpacity
+                                    style={[styles.actionButton, { 
+                                        backgroundColor: isFavorite ? theme.colors.danger : theme.colors.success 
+                                    }]}
+                                    onPress={handleFavoritePress}
+                                >
+                                    <Text style={styles.actionButtonText}>
+                                        {isFavorite ? 'Remove' : 'Favorite'}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
+                        
+                        <View style={styles.navButtonContainer}>
+                            <TouchableOpacity 
+                                style={[styles.navButton, { backgroundColor: theme.colors.card }]} 
+                                onPress={() => navigation.navigate('Favorites')}
+                            >
+                                <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                    My Favorites
+                                </Text>
+                            </TouchableOpacity>
+                            
+                            <TouchableOpacity 
+                                style={[styles.navButton, { backgroundColor: theme.colors.card }]} 
+                                onPress={() => navigation.navigate('PrayerBoard')}
+                            >
+                                <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                    Prayer Board
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <TouchableOpacity 
+                            style={[styles.profileNavButton, { backgroundColor: theme.colors.card }]} 
+                            onPress={navigateToProfile}
+                        >
+                            <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                Profile Settings
+                            </Text>
+                        </TouchableOpacity>
                     </>
                 ) : (
-                    <Text>No verse selected yet.</Text>
+                    <Text style={{ color: theme.colors.text }}>No verse selected yet.</Text>
                 )}
             </View>
         </View>
@@ -158,20 +250,22 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f0f0f0',
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: 10,
-        backgroundColor: '#f8f9fa',
         borderBottomWidth: 1,
-        borderBottomColor: '#e9ecef',
+    },
+    profileButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     welcomeText: {
         fontSize: 16,
         fontWeight: 'bold',
+        marginLeft: 8,
     },
     verseContainer: {
         padding: 20,
@@ -179,23 +273,56 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         flex: 1,
     },
-    verseText: {
-        fontSize: 20,
-        fontFamily: 'serif',
-        lineHeight: 28,
-        marginBottom: 20,
-        textAlign: 'center',
-        color: '#333',
-    },
     verseReference: {
-        fontSize: 14,
         fontStyle: 'italic',
-        marginBottom: 20,
+        marginBottom: 30,
         textAlign: 'center',
     },
-    buttonGroup: {
-        marginTop: 20,
+    actionButtonContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
         width: '100%',
+        marginBottom: 20,
+    },
+    actionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 20,
+        borderRadius: 25,
+        marginHorizontal: 10,
+    },
+    actionButtonText: {
+        color: 'white',
+        marginLeft: 8,
+        fontWeight: '600',
+    },
+    navButtonContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        width: '100%',
+        marginTop: 20,
+    },
+    navButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 15,
+        borderRadius: 10,
+        width: '45%',
+        justifyContent: 'center',
+    },
+    profileNavButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 15,
+        borderRadius: 10,
+        width: '80%', 
+        justifyContent: 'center',
+        marginTop: 15,
+    },
+    navButtonText: {
+        marginLeft: 8,
+        fontWeight: '500',
     },
 });
 

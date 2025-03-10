@@ -2,7 +2,8 @@ import React, { createContext, useContext, ReactNode, useState, useEffect } from
 import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
 import { Auth, User, onAuthStateChanged } from "firebase/auth";
-import { firebaseInstance } from '../services/firebase/firebaseConfig';
+import { firebaseInstance } from '../services/firebase/firebaseConfig'; // Adjust path
+import { UserProfile, createUserProfile, getUserProfile } from '../services/firebase/userProfile';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
@@ -10,6 +11,9 @@ interface FirebaseContextType {
     db: Firestore | null;
     firebaseInstance: typeof firebaseInstance;
     user: User | null;
+    userProfile: UserProfile | null;
+    refreshUserProfile: () => Promise<void>;
+    isLoading: boolean;
 }
 
 interface FirebaseProviderProps {
@@ -21,16 +25,43 @@ const FirebaseContext = createContext<FirebaseContextType>({
     auth: null,
     db: null,
     firebaseInstance: firebaseInstance,
-    user: null
+    user: null,
+    userProfile: null,
+    refreshUserProfile: async () => {},
+    isLoading: true
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
     console.log("FirebaseProvider rendered");
     const [user, setUser] = useState<User | null>(firebaseInstance.auth?.currentUser || null);
+    const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
 
+    // Fetch user profile whenever user changes
+    useEffect(() => {
+        const fetchUserProfile = async () => {
+            if (user && firebaseInstance.db) {
+                try {
+                    // Create profile if it doesn't exist, or get existing one
+                    const profile = await createUserProfile(user);
+                    setUserProfile(profile);
+                } catch (error) {
+                    console.error("Error fetching user profile:", error);
+                }
+            } else {
+                setUserProfile(null);
+            }
+            setIsLoading(false);
+        };
+
+        fetchUserProfile();
+    }, [user]);
+
+    // Set up auth state listener
     useEffect(() => {
         if (!firebaseInstance.auth) {
             console.log("Auth not initialized in FirebaseProvider");
+            setIsLoading(false);
             return;
         }
 
@@ -47,20 +78,30 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         };
     }, [firebaseInstance.auth]);
 
+    // Function to manually refresh user profile
+    const refreshUserProfile = async () => {
+        if (user && firebaseInstance.db) {
+            try {
+                const profile = await getUserProfile(user.uid);
+                if (profile) {
+                    setUserProfile(profile);
+                }
+            } catch (error) {
+                console.error("Error refreshing user profile:", error);
+            }
+        }
+    };
+
     const value: FirebaseContextType = {
         app: firebaseInstance.app,
         auth: firebaseInstance.auth,
         db: firebaseInstance.db,
         firebaseInstance: firebaseInstance,
-        user: user
+        user,
+        userProfile,
+        refreshUserProfile,
+        isLoading
     };
-
-    console.log("FirebaseProvider value:", { 
-        appInitialized: !!value.app, 
-        authInitialized: !!value.auth, 
-        dbInitialized: !!value.db,
-        userEmail: value.user?.email
-    });
 
     return (
         <FirebaseContext.Provider value={value}>
