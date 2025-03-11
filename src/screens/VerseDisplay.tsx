@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Button, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import versesData from '../data/combinedBible.json';
 import RenderHtml from 'react-native-render-html';
 import { db } from "../services/firebase/firebaseConfig";
@@ -132,10 +132,11 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
         
         const fontSize = getFontSize();
         
-        return currentVerse.text.replace(
-            /<p>/g, 
-            `<p style="font-size: ${fontSize}px; line-height: ${fontSize * 1.5}px; color: ${theme.colors.text};">`
-        );
+        // Replace all text-containing elements to ensure proper theme colors
+        return currentVerse.text
+            .replace(/<p[^>]*>/g, `<p style="font-size: ${fontSize}px; line-height: ${fontSize * 1.5}px; color: ${theme.colors.text};">`)
+            .replace(/<span[^>]*>/g, `<span style="color: ${theme.colors.text};">`)
+            .replace(/<div[^>]*>/g, `<div style="color: ${theme.colors.text};">`);
     };
 
     if (loading) {
@@ -178,8 +179,19 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                             source={{ html: getTaggedVerseText() }} 
                             contentWidth={width} 
                             tagsStyles={{
-                                p: { color: theme.colors.text }
+                                p: { color: theme.colors.text },
+                                span: { color: theme.colors.text },
+                                div: { color: theme.colors.text },
+                                h1: { color: theme.colors.text },
+                                h2: { color: theme.colors.text },
+                                h3: { color: theme.colors.text },
+                                h4: { color: theme.colors.text },
+                                h5: { color: theme.colors.text },
+                                h6: { color: theme.colors.text },
+                                li: { color: theme.colors.text },
+                                a: { color: theme.colors.primary }
                             }}
+                            baseStyle={{ color: theme.colors.text }}
                         />
                         <Text style={[styles.verseReference, { 
                             color: theme.colors.secondary,
