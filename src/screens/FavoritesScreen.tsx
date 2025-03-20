@@ -1,11 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Button, useWindowDimensions, Alert } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  ScrollView, 
+  TouchableOpacity, 
+  useWindowDimensions, 
+  Alert,
+  Platform, 
+  ActivityIndicator
+} from 'react-native';
 import { db } from '../services/firebase/firebaseConfig';
 import { collection, onSnapshot, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import RenderHtml from 'react-native-render-html';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Verse {
     id: string;
@@ -120,96 +131,166 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
         
         // Replace all text-containing elements to ensure proper theme colors
         return text
-            .replace(/<p[^>]*>/g, `<p style="font-size: ${fontSize}px; line-height: ${fontSize * 1.5}px; color: ${theme.colors.text};">`)
+            .replace(/<p[^>]*>/g, `<p style="font-size: ${fontSize}px; line-height: ${fontSize * 1.6}px; color: ${theme.colors.text}; margin-bottom: ${theme.spacing.md}px;">`)
             .replace(/<span[^>]*>/g, `<span style="color: ${theme.colors.text};">`)
             .replace(/<div[^>]*>/g, `<div style="color: ${theme.colors.text};">`);
     };
 
     if (loading) {
         return (
-            <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-                <Text style={[styles.message, { color: theme.colors.text }]}>Loading favorites...</Text>
+            <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+                <ActivityIndicator size="large" color={theme.colors.primary} />
+                <Text style={[styles.message, { color: theme.colors.text, marginTop: theme.spacing.md }]}>
+                    Loading favorites...
+                </Text>
             </View>
         );
     }
 
     if (!user) {
         return (
-            <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-                <Text style={[styles.message, { color: theme.colors.text }]}>Please log in to view favorites.</Text>
+            <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
+                <Ionicons name="person-circle-outline" size={48} color={theme.colors.primary} />
+                <Text style={[styles.message, { color: theme.colors.text, marginTop: theme.spacing.md }]}>
+                    Please log in to view favorites.
+                </Text>
             </View>
         );
     }
 
     return (
-        <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
             {favorites.length > 0 ? (
-                favorites.map((verse) => (
-                    <View key={verse.id} style={[
-                        styles.verseContainer, 
-                        { 
-                            backgroundColor: theme.colors.card,
-                            borderColor: theme.colors.border
-                        }
-                    ]}>
-                        <RenderHtml 
-                            source={{ html: getThemedVerseText(verse.text) }} 
-                            contentWidth={width} 
-                            tagsStyles={{
-                                p: { color: theme.colors.text },
-                                span: { color: theme.colors.text },
-                                div: { color: theme.colors.text },
-                                h1: { color: theme.colors.text },
-                                h2: { color: theme.colors.text },
-                                h3: { color: theme.colors.text },
-                                h4: { color: theme.colors.text },
-                                h5: { color: theme.colors.text },
-                                h6: { color: theme.colors.text },
-                                li: { color: theme.colors.text },
-                                a: { color: theme.colors.primary }
-                            }}
-                            baseStyle={{ color: theme.colors.text }}
-                        />
-                        <Text style={[
-                            styles.verseReference, 
-                            { 
-                                color: theme.colors.secondary,
-                                fontSize: theme.fontSize.sm 
-                            }
-                        ]}>
-                            {verse.book_name} {verse.chapter}:{verse.verse}
-                        </Text>
-                        {verse.note && (
-                            <Text style={[
-                                styles.noteText, 
+                <>
+                    <Text style={[styles.headerText, { color: theme.colors.text }]}>
+                        You have {favorites.length} favorite {favorites.length === 1 ? 'verse' : 'verses'}
+                    </Text>
+                    <ScrollView 
+                        style={styles.scrollView}
+                        contentContainerStyle={styles.scrollViewContent}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {favorites.map((verse) => (
+                            <View key={verse.id} style={[
+                                styles.verseContainer, 
                                 { 
-                                    color: theme.colors.text,
-                                    backgroundColor: `${theme.colors.primary}20`,
-                                    borderColor: theme.colors.border
+                                    backgroundColor: theme.colors.card,
+                                    borderColor: theme.colors.border,
+                                    ...getShadowStyle(theme)
                                 }
                             ]}>
-                                Note: {verse.note}
-                            </Text>
-                        )}
-                        <View style={styles.buttonContainer}>
-                            <Button 
-                                title="Edit Note" 
-                                onPress={() => handleEditNote(verse)}
-                                color={theme.colors.primary}
-                            />
-                            <Button 
-                                title="Remove" 
-                                onPress={() => handleRemoveFavorite(verse.id)}
-                                color={theme.colors.danger}
-                            />
-                        </View>
-                    </View>
-                ))
+                                <RenderHtml 
+                                    source={{ html: getThemedVerseText(verse.text) }} 
+                                    contentWidth={width - (theme.spacing.lg * 2) - (theme.spacing.md * 2)}
+                                    tagsStyles={{
+                                        p: { color: theme.colors.text },
+                                        span: { color: theme.colors.text },
+                                        div: { color: theme.colors.text },
+                                        h1: { color: theme.colors.text },
+                                        h2: { color: theme.colors.text },
+                                        h3: { color: theme.colors.text },
+                                        h4: { color: theme.colors.text },
+                                        h5: { color: theme.colors.text },
+                                        h6: { color: theme.colors.text },
+                                        li: { color: theme.colors.text },
+                                        a: { color: theme.colors.primary }
+                                    }}
+                                    baseStyle={{ color: theme.colors.text }}
+                                />
+                                <Text style={[
+                                    styles.verseReference, 
+                                    { 
+                                        color: theme.colors.textSecondary,
+                                        fontSize: theme.fontSize.sm,
+                                        borderTopColor: theme.colors.divider 
+                                    }
+                                ]}>
+                                    {verse.book_name} {verse.chapter}:{verse.verse}
+                                </Text>
+                                
+                                {verse.note && (
+                                    <View style={[
+                                        styles.noteContainer, 
+                                        { 
+                                            backgroundColor: `${theme.colors.primary}10`,
+                                            borderLeftColor: theme.colors.primary
+                                        }
+                                    ]}>
+                                        <Text style={[
+                                            styles.noteText, 
+                                            { color: theme.colors.text }
+                                        ]}>
+                                            {verse.note}
+                                        </Text>
+                                    </View>
+                                )}
+                                
+                                <View style={styles.buttonContainer}>
+                                    <TouchableOpacity 
+                                        style={[
+                                            styles.actionButton, 
+                                            { backgroundColor: theme.colors.surface }
+                                        ]} 
+                                        onPress={() => handleEditNote(verse)}
+                                    >
+                                        <Ionicons name="create-outline" size={18} color={theme.colors.primary} />
+                                        <Text style={[styles.actionButtonText, { color: theme.colors.text }]}>
+                                            {verse.note ? "Edit Note" : "Add Note"}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    
+                                    <TouchableOpacity 
+                                        style={[
+                                            styles.actionButton, 
+                                            { backgroundColor: `${theme.colors.danger}15` }
+                                        ]} 
+                                        onPress={() => handleRemoveFavorite(verse.id)}
+                                    >
+                                        <Ionicons name="trash-outline" size={18} color={theme.colors.danger} />
+                                        <Text style={[styles.actionButtonText, { color: theme.colors.danger }]}>
+                                            Remove
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ))}
+                    </ScrollView>
+                </>
             ) : (
-                <Text style={[styles.message, { color: theme.colors.text }]}>No favorite verses yet.</Text>
+                <View style={styles.emptyContainer}>
+                    <Ionicons name="bookmark-outline" size={64} color={theme.colors.secondary} />
+                    <Text style={[styles.emptyMessage, { color: theme.colors.text }]}>
+                        No favorite verses yet
+                    </Text>
+                    <Text style={[styles.emptySubMessage, { color: theme.colors.textSecondary }]}>
+                        Your favorite verses will appear here
+                    </Text>
+                    <TouchableOpacity 
+                        style={[styles.backButton, { backgroundColor: theme.colors.primary }]}
+                        onPress={() => navigation.navigate('VerseDisplay')}
+                    >
+                        <Text style={styles.backButtonText}>Go to Verses</Text>
+                    </TouchableOpacity>
+                </View>
             )}
-        </ScrollView>
+        </View>
     );
+};
+
+// Helper function for consistent shadow styling
+const getShadowStyle = (theme: any) => {
+    if (Platform.OS === 'ios') {
+        return {
+            shadowColor: theme.colors.shadow,
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.8,
+            shadowRadius: 5,
+        };
+    } else {
+        return {
+            elevation: 4,
+        };
+    }
 };
 
 const styles = StyleSheet.create({
@@ -217,31 +298,94 @@ const styles = StyleSheet.create({
         flex: 1,
         padding: 16,
     },
-    verseContainer: {
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    message: {
+        fontSize: 16,
+        textAlign: 'center',
+    },
+    headerText: {
+        fontSize: 18,
+        fontWeight: '600',
         marginBottom: 16,
-        borderWidth: 1,
+        paddingHorizontal: 4,
+    },
+    scrollView: {
+        flex: 1,
+    },
+    scrollViewContent: {
+        paddingBottom: 24,
+    },
+    verseContainer: {
+        marginBottom: 20,
+        borderRadius: 16,
         padding: 16,
-        borderRadius: 8,
+        borderWidth: 0,
     },
     verseReference: {
         fontStyle: 'italic',
-        marginVertical: 8,
+        marginTop: 16,
+        paddingTop: 16,
+        textAlign: 'right',
+        borderTopWidth: 1,
+    },
+    noteContainer: {
+        marginTop: 16,
+        padding: 12,
+        borderRadius: 8,
+        borderLeftWidth: 4,
     },
     noteText: {
-        marginTop: 8,
-        padding: 8,
-        borderRadius: 4,
-        borderWidth: 1,
         fontStyle: 'italic',
+        fontSize: 15,
     },
     buttonContainer: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
+        justifyContent: 'space-between',
         marginTop: 16,
     },
-    message: {
-        padding: 20,
+    actionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        flex: 0.48,
+    },
+    actionButtonText: {
+        marginLeft: 8,
+        fontWeight: '500',
+        fontSize: 14,
+    },
+    emptyContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 40,
+    },
+    emptyMessage: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginTop: 24,
+        marginBottom: 8,
+    },
+    emptySubMessage: {
+        fontSize: 16,
         textAlign: 'center',
+        marginBottom: 32,
+    },
+    backButton: {
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 50,
+    },
+    backButtonText: {
+        color: 'white',
+        fontWeight: '600',
         fontSize: 16,
     },
 });

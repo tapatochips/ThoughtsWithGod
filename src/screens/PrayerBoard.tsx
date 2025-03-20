@@ -4,12 +4,13 @@ import {
   Text, 
   StyleSheet, 
   TextInput, 
-  Button, 
+  TouchableOpacity, 
   FlatList, 
   Alert,
-  TouchableOpacity,
   Modal,
-  ScrollView
+  Platform,
+  ActivityIndicator,
+  KeyboardAvoidingView
 } from 'react-native';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -25,9 +26,9 @@ import {
   Timestamp,
   arrayUnion,
   arrayRemove,
-  getDoc,
   getDocs
 } from 'firebase/firestore';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Comment {
   id: string;
@@ -60,6 +61,7 @@ const PrayerBoard: React.FC = () => {
   const [comments, setComments] = useState<Comment[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPrayer, setSelectedPrayer] = useState<PrayerRequest | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!db || !user) {
@@ -128,6 +130,7 @@ const PrayerBoard: React.FC = () => {
 
   const handleAddPrayer = async () => {
     if (!user || !db || !newPrayer.trim()) return;
+    setSubmitting(true);
 
     try {
       const prayersCollection = collection(db, 'prayers');
@@ -146,6 +149,8 @@ const PrayerBoard: React.FC = () => {
     } catch (error) {
       console.error("Error adding prayer request:", error);
       Alert.alert("Error", "Failed to add prayer request. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -234,6 +239,7 @@ const PrayerBoard: React.FC = () => {
 
   const handleAddComment = async () => {
     if (!user || !db || !selectedPrayer || !newComment.trim()) return;
+    setSubmitting(true);
 
     try {
       const commentsCollection = collection(db, `prayers/${selectedPrayer.id}/comments`);
@@ -257,6 +263,8 @@ const PrayerBoard: React.FC = () => {
     } catch (error) {
       console.error("Error adding comment:", error);
       Alert.alert("Error", "Failed to add comment. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -284,298 +292,689 @@ const PrayerBoard: React.FC = () => {
     }
   };
 
-  if (!user) {
+  // Function to format the timestamp
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return '';
+    
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return 'Today';
+    } else if (diffDays === 1) {
+      return 'Yesterday';
+    } else if (diffDays < 7) {
+      return `${diffDays} days ago`;
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
+
+  if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <Text style={{ color: theme.colors.text }}>Please log in to use the Prayer Board.</Text>
+      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
+          Loading Prayer Board...
+        </Text>
       </View>
     );
   }
 
-  if (loading) {
+  if (!user) {
     return (
-      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <Text style={{ color: theme.colors.text }}>Loading Prayer Board...</Text>
+      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+        <Ionicons name="person-circle-outline" size={48} color={theme.colors.primary} />
+        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
+          Please log in to use the Prayer Board.
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Text style={[styles.title, { color: theme.colors.text }]}>Prayer Board</Text>
-      
-      <View style={[styles.inputContainer, { borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}>
-        <TextInput
-          style={[styles.input, { color: theme.colors.text }]}
-          value={newPrayer}
-          onChangeText={setNewPrayer}
-          placeholder="Enter your prayer request..."
-          placeholderTextColor={theme.colors.secondary}
-          multiline
-        />
-        <Button 
-          title="Add Prayer" 
-          onPress={handleAddPrayer}
-          color={theme.colors.primary}
-        />
-      </View>
-      
-      <FlatList
-        data={prayers}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={[
-            styles.prayerItem, 
-            { 
-              backgroundColor: theme.colors.card, 
-              borderColor: theme.colors.border
-            },
-            item.answered && styles.answeredPrayer
-          ]}>
-            <Text style={[styles.prayerText, { color: theme.colors.text }]}>{item.text}</Text>
-            <Text style={[styles.prayerMeta, { color: theme.colors.secondary }]}>
-              Posted by: {item.username || item.userEmail?.split('@')[0]} 
-              {item.answered ? ' (Answered)' : ''}
-            </Text>
-            
-            <View style={[styles.interactionBar, { borderTopColor: theme.colors.border }]}>
-              <TouchableOpacity 
-                style={styles.interactionButton} 
-                onPress={() => handleToggleLike(item)}
-              >
-                <Text style={[
-                  styles.interactionText,
-                  { color: theme.colors.secondary },
-                  item.likedBy.includes(user.uid) && { color: '#e91e63' }
-                ]}>
-                  ❤️ {item.likedBy.length}
-                </Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.interactionButton}
-                onPress={() => openComments(item)}
-              >
-                <Text style={[styles.interactionText, { color: theme.colors.secondary }]}>
-                  💬 {item.commentCount || 0}
-                </Text>
-              </TouchableOpacity>
-            </View>
-            
-            {user.uid === item.userId && (
-              <View style={styles.prayerActions}>
-                <Button
-                  title={item.answered ? "Mark Unanswered" : "Mark Answered"}
-                  onPress={() => handleToggleAnswered(item.id, item.answered)}
-                  color={theme.colors.primary}
-                />
-                <Button
-                  title="Delete"
-                  onPress={() => handleDeletePrayer(item.id, item.userId)}
-                  color="#dc3545"
-                />
-              </View>
-            )}
-          </View>
-        )}
-        ListEmptyComponent={
-          <Text style={[styles.message, { color: theme.colors.text }]}>
-            No prayer requests yet. Be the first to add one!
+    <KeyboardAvoidingView 
+      style={{ flex: 1 }} 
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+    >
+      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={[styles.header, { backgroundColor: theme.colors.card, ...getShadowStyle(theme) }]}>
+          <Text style={[styles.title, { color: theme.colors.text }]}>Prayer Board</Text>
+          <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
+            Share your prayer requests and support others
           </Text>
-        }
-      />
-      
-      {/* Comments Modal */}
-      <Modal
-        animationType="slide"
-        transparent={false}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
-          <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}>
-            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
-            <Button 
-              title="Close" 
-              onPress={() => setModalVisible(false)}
-              color={theme.colors.primary}
-            />
-          </View>
-          
-          {selectedPrayer && (
-            <View style={[styles.originalPrayer, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-              <Text style={[styles.originalPrayerText, { color: theme.colors.text }]}>{selectedPrayer.text}</Text>
-              <Text style={[styles.prayerMeta, { color: theme.colors.secondary }]}>
-                Posted by: {selectedPrayer.username || selectedPrayer.userEmail?.split('@')[0]}
-                {selectedPrayer.answered ? ' (Answered)' : ''}
+        </View>
+        
+        <View style={[styles.inputContainer, { 
+          borderColor: theme.colors.border, 
+          backgroundColor: theme.colors.card,
+          ...getShadowStyle(theme)
+        }]}>
+          <TextInput
+            style={[styles.input, { color: theme.colors.text }]}
+            value={newPrayer}
+            onChangeText={setNewPrayer}
+            placeholder="Enter your prayer request..."
+            placeholderTextColor={theme.colors.secondary}
+            multiline
+          />
+          <TouchableOpacity 
+            style={[
+              styles.addButton, 
+              { backgroundColor: theme.colors.primary },
+              submitting && { opacity: 0.7 }
+            ]}
+            onPress={handleAddPrayer}
+            disabled={submitting || !newPrayer.trim()}
+          >
+            {submitting ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <>
+                <Ionicons name="add" size={18} color="white" />
+                <Text style={styles.addButtonText}>Add Prayer</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+        
+        <FlatList
+          data={prayers}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <View style={[
+              styles.prayerItem, 
+              { 
+                backgroundColor: theme.colors.card,
+                borderColor: theme.colors.border,
+                ...getShadowStyle(theme)
+              },
+              item.answered && [styles.answeredPrayer, { borderColor: theme.colors.success }]
+            ]}>
+              <View style={styles.prayerHeader}>
+                <View style={styles.userInfo}>
+                  <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
+                    <Text style={styles.avatarText}>
+                      {(item.username || item.userEmail)[0].toUpperCase()}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text style={[styles.username, { color: theme.colors.text }]}>
+                      {item.username || item.userEmail?.split('@')[0]}
+                    </Text>
+                    <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
+                      {formatDate(item.createdAt)}
+                    </Text>
+                  </View>
+                </View>
+                
+                {item.answered && (
+                  <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
+                    <Text style={styles.answeredText}>Answered</Text>
+                  </View>
+                )}
+              </View>
+              
+              <Text style={[styles.prayerText, { color: theme.colors.text }]}>
+                {item.text}
               </Text>
+              
+              <View style={[styles.interactionBar, { borderTopColor: theme.colors.divider }]}>
+                <TouchableOpacity 
+                  style={styles.interactionButton} 
+                  onPress={() => handleToggleLike(item)}
+                >
+                  <Ionicons 
+                    name={item.likedBy.includes(user.uid) ? "heart" : "heart-outline"} 
+                    size={20} 
+                    color={item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary} 
+                  />
+                  <Text style={[
+                    styles.interactionText,
+                    { color: item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary }
+                  ]}>
+                    {item.likedBy.length}
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.interactionButton}
+                  onPress={() => openComments(item)}
+                >
+                  <Ionicons 
+                    name="chatbubble-outline" 
+                    size={18} 
+                    color={theme.colors.textSecondary} 
+                  />
+                  <Text style={[styles.interactionText, { color: theme.colors.textSecondary }]}>
+                    {item.commentCount || 0}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              {user.uid === item.userId && (
+                <View style={[styles.ownerActions, { borderTopColor: theme.colors.divider }]}>
+                  <TouchableOpacity
+                    style={[styles.ownerActionButton, { backgroundColor: theme.colors.surface }]}
+                    onPress={() => handleToggleAnswered(item.id, item.answered)}
+                  >
+                    <Ionicons 
+                      name={item.answered ? "close-circle-outline" : "checkmark-circle-outline"} 
+                      size={18} 
+                      color={item.answered ? theme.colors.danger : theme.colors.success} 
+                    />
+                    <Text style={[
+                      styles.ownerActionText, 
+                      { 
+                        color: item.answered ? theme.colors.danger : theme.colors.success 
+                      }
+                    ]}>
+                      {item.answered ? "Mark Unanswered" : "Mark Answered"}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.ownerActionButton, { backgroundColor: `${theme.colors.danger}15` }]}
+                    onPress={() => handleDeletePrayer(item.id, item.userId)}
+                  >
+                    <Ionicons 
+                      name="trash-outline" 
+                      size={18} 
+                      color={theme.colors.danger} 
+                    />
+                    <Text style={[styles.ownerActionText, { color: theme.colors.danger }]}>
+                      Delete
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
-          
-          <FlatList
-            data={comments}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <View style={[styles.commentItem, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
-                <View style={styles.commentHeader}>
-                  <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
-                    {item.username || item.userEmail?.split('@')[0]}:
-                  </Text>
-                  {user.uid === item.userId && (
-                    <TouchableOpacity
-                      onPress={() => handleDeleteComment(item.id, item.userId)}
-                    >
-                      <Text style={{ color: '#dc3545' }}>Delete</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-                <Text style={[styles.commentText, { color: theme.colors.text }]}>{item.text}</Text>
-              </View>
-            )}
-            ListEmptyComponent={
-              <Text style={[styles.message, { color: theme.colors.text }]}>
-                No comments yet. Be the first to comment!
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="people-outline" size={64} color={theme.colors.secondary} />
+              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+                No prayer requests yet
               </Text>
-            }
-          />
-          
-          <View style={[styles.commentInputContainer, { borderTopColor: theme.colors.border }]}>
-            <TextInput
-              style={[styles.commentInput, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, color: theme.colors.text }]}
-              value={newComment}
-              onChangeText={setNewComment}
-              placeholder="Write a comment..."
-              placeholderTextColor={theme.colors.secondary}
-              multiline
-            />
-            <Button 
-              title="Post" 
-              onPress={handleAddComment}
-              color={theme.colors.primary}
-            />
-          </View>
-        </View>
-      </Modal>
-    </View>
+              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+                Be the first to add a prayer request
+              </Text>
+            </View>
+          }
+        />
+        
+        {/* Comments Modal */}
+        <Modal
+          animationType="slide"
+          transparent={false}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <KeyboardAvoidingView 
+            style={{ flex: 1 }} 
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+          >
+            <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+              <View style={[styles.modalHeader, { 
+                backgroundColor: theme.colors.card,
+                borderBottomColor: theme.colors.divider,
+                ...getShadowStyle(theme)
+              }]}>
+                <TouchableOpacity onPress={() => setModalVisible(false)}>
+                  <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
+                </TouchableOpacity>
+                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
+                <View style={{ width: 24 }} />
+              </View>
+              
+              {selectedPrayer && (
+                <View style={[
+                  styles.originalPrayer, 
+                  { 
+                    backgroundColor: theme.colors.card,
+                    borderLeftColor: theme.colors.primary,
+                    ...getShadowStyle(theme)
+                  }
+                ]}>
+                  <View style={styles.prayerHeader}>
+                    <View style={styles.userInfo}>
+                      <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
+                        <Text style={styles.avatarText}>
+                          {(selectedPrayer.username || selectedPrayer.userEmail)[0].toUpperCase()}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text style={[styles.username, { color: theme.colors.text }]}>
+                          {selectedPrayer.username || selectedPrayer.userEmail?.split('@')[0]}
+                        </Text>
+                        <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
+                          {formatDate(selectedPrayer.createdAt)}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    {selectedPrayer.answered && (
+                      <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
+                        <Text style={styles.answeredText}>Answered</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.originalPrayerText, { color: theme.colors.text }]}>
+                    {selectedPrayer.text}
+                  </Text>
+                </View>
+              )}
+              
+              <FlatList
+                data={comments}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.commentsList}
+                ListHeaderComponent={
+                  comments.length > 0 ? (
+                    <Text style={[styles.commentsCount, { color: theme.colors.textSecondary }]}>
+                      {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
+                    </Text>
+                  ) : null
+                }
+                renderItem={({ item }) => (
+                  <View style={[
+                    styles.commentItem, 
+                    { 
+                      backgroundColor: user?.uid === item.userId 
+                        ? `${theme.colors.primary}15` 
+                        : theme.colors.card,
+                      borderLeftColor: user?.uid === item.userId 
+                        ? theme.colors.primary 
+                        : theme.colors.border
+                    }
+                  ]}>
+                    <View style={styles.commentHeader}>
+                      <View style={styles.commentUser}>
+                        <View style={[
+                          styles.smallAvatarCircle, 
+                          { 
+                            backgroundColor: user?.uid === item.userId 
+                              ? theme.colors.primary 
+                              : theme.colors.secondary
+                          }
+                        ]}>
+                          <Text style={styles.smallAvatarText}>
+                            {(item.username || item.userEmail)[0].toUpperCase()}
+                          </Text>
+                        </View>
+                        <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
+                          {item.username || item.userEmail?.split('@')[0]}
+                        </Text>
+                      </View>
+                      
+                      {user?.uid === item.userId && (
+                        <TouchableOpacity
+                          onPress={() => handleDeleteComment(item.id, item.userId)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                    <Text style={[styles.commentText, { color: theme.colors.text }]}>
+                      {item.text}
+                    </Text>
+                    <Text style={[styles.commentDate, { color: theme.colors.textSecondary }]}>
+                      {formatDate(item.createdAt)}
+                    </Text>
+                  </View>
+                )}
+                ListEmptyComponent={
+                  <View style={styles.emptyCommentsContainer}>
+                    <Ionicons name="chatbubble-outline" size={40} color={theme.colors.secondary} />
+                    <Text style={[styles.emptyCommentsText, { color: theme.colors.textSecondary }]}>
+                      No comments yet. Be the first to comment!
+                    </Text>
+                  </View>
+                }
+              />
+              
+              <View style={[
+                styles.commentInputContainer, 
+                { 
+                  borderTopColor: theme.colors.divider,
+                  backgroundColor: theme.colors.card
+                }
+              ]}>
+                <TextInput
+                  style={[
+                    styles.commentInput, 
+                    { 
+                      backgroundColor: theme.colors.background, 
+                      borderColor: theme.colors.border,
+                      color: theme.colors.text 
+                    }
+                  ]}
+                  value={newComment}
+                  onChangeText={setNewComment}
+                  placeholder="Write a comment..."
+                  placeholderTextColor={theme.colors.secondary}
+                  multiline
+                  maxLength={500}
+                />
+                <TouchableOpacity 
+                  style={[
+                    styles.postButton, 
+                    { backgroundColor: theme.colors.primary },
+                    (submitting || !newComment.trim()) && { opacity: 0.5 }
+                  ]}
+                  onPress={handleAddComment}
+                  disabled={submitting || !newComment.trim()}
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Ionicons name="send" size={20} color="white" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      </View>
+    </KeyboardAvoidingView>
   );
+};
+
+// Helper function for consistent shadow styling
+const getShadowStyle = (theme: any) => {
+  if (Platform.OS === 'ios') {
+      return {
+          shadowColor: theme.colors.shadow,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.8,
+          shadowRadius: 3,
+      };
+  } else {
+      return {
+          elevation: 3,
+      };
+  }
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 16,
+  },
+  header: {
+    padding: 16,
+    borderRadius: 0,
+    marginBottom: 16,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 16,
     textAlign: 'center',
   },
+  subtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 4,
+  },
   inputContainer: {
-    marginBottom: 20,
-    borderWidth: 1,
-    borderRadius: 8,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    borderWidth: 0,
   },
   input: {
-    padding: 12,
+    padding: 16,
     fontSize: 16,
-    minHeight: 80,
+    minHeight: 100,
+    maxHeight: 150,
+    textAlignVertical: 'top',
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    margin: 8,
+  },
+  addButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24
   },
   prayerItem: {
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 0,
+    overflow: 'hidden',
   },
   answeredPrayer: {
-    backgroundColor: '#e8f4f8',
-    borderColor: '#a8dadc',
+    borderLeftWidth: 4,
+  },
+  prayerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  avatarText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  username: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  prayerDate: {
+    fontSize: 12,
+  },
+  answeredBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  answeredText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
   prayerText: {
     fontSize: 16,
-    marginBottom: 8,
-  },
-  prayerMeta: {
-    fontSize: 12,
-    marginBottom: 8,
+    lineHeight: 24,
+    paddingHorizontal: 12,
+    paddingBottom: 16,
   },
   interactionBar: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    paddingTop: 8,
-    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   interactionButton: {
-    marginRight: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 20,
   },
   interactionText: {
+    marginLeft: 4,
     fontSize: 14,
   },
-  prayerActions: {
+  ownerActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    padding: 8,
+    borderTopWidth: 1,
+  },
+  ownerActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flex: 0.48,
+  },
+  ownerActionText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '500',
   },
   message: {
     padding: 20,
     textAlign: 'center',
     fontSize: 16,
   },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    marginTop: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
   modalContainer: {
     flex: 1,
-    padding: 16,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    padding: 16,
     borderBottomWidth: 1,
-    paddingBottom: 8,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
   },
   originalPrayer: {
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderWidth: 1,
+    margin: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
   },
   originalPrayerText: {
     fontSize: 16,
-    fontStyle: 'italic',
+    lineHeight: 24,
+    padding: 12,
+  },
+  commentsList: {
+    padding: 16,
+    paddingBottom: 80,
+  },
+  commentsCount: {
+    fontSize: 14,
+    marginBottom: 12,
   },
   commentItem: {
     padding: 12,
     borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
+    marginBottom: 12,
+    borderLeftWidth: 3,
   },
   commentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  commentUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  smallAvatarCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  smallAvatarText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   commentAuthor: {
-    fontWeight: 'bold',
+    fontWeight: '600',
     fontSize: 14,
   },
   commentText: {
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  commentDate: {
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'right',
+  },
+  emptyCommentsContainer: {
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+  emptyCommentsText: {
+    marginTop: 8,
+    textAlign: 'center',
   },
   commentInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
     borderTopWidth: 1,
-    paddingTop: 16,
-    marginTop: 8,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
   },
   commentInput: {
-    padding: 12,
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 100,
     borderWidth: 1,
-    borderRadius: 8,
-    fontSize: 16,
-    minHeight: 60,
-    marginBottom: 8,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+  },
+  postButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
 
