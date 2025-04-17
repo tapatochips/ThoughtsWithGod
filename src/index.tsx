@@ -7,10 +7,33 @@ import * as nodemailer from 'nodemailer';
 admin.initializeApp();
 
 // Initialize Stripe with your secret key
+const stripe = new Stripe('sk_test_your_stripe_secret_key', {
+  apiVersion: '2023-08-16', // Use the current API version
+});
+
+// Set up email transport for nodemailer
+const emailTransport = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'thoughtswithgod@gmail.com',
+    pass: 'your_app_password', // This should be an app password, not your regular password
+  },
+});
+
+// Interface for stripe product IDs
+interface StripeProduct {
+  id: string;
+  price: string;
+  amount: number;
+}
+
+interface StripeProducts {
+  [key: string]: StripeProduct;
+}
 
 // Stripe Product IDs for subscription plans
 // These would be created in your Stripe dashboard
-const STRIPE_PRODUCTS = {
+const STRIPE_PRODUCTS: StripeProducts = {
   monthly_basic: {
     id: 'prod_basic_monthly',
     price: 'price_basic_monthly',
@@ -28,10 +51,20 @@ const STRIPE_PRODUCTS = {
   }
 };
 
+// Define types for function data
+interface PaymentIntentData {
+  amount: number;
+  currency: string;
+  paymentMethodId: string;
+  description: string;
+  metadata?: Record<string, string>;
+  receiptEmail?: string;
+}
+
 /**
  * Creates a Stripe Payment Intent for one-time payments
  */
-export const createPaymentIntent = functions.https.onCall(async (data, context) => {
+export const createPaymentIntent = functions.https.onCall(async (data: PaymentIntentData, context: functions.https.CallableContext) => {
   // Ensure user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -63,19 +96,23 @@ export const createPaymentIntent = functions.https.onCall(async (data, context) 
       clientSecret: paymentIntent.client_secret,
       transactionId: paymentIntent.id
     };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Payment intent creation failed:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      error.message || 'Payment processing failed'
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Payment processing failed';
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
 });
+
+interface SubscriptionData {
+  planId: string;
+  paymentMethodId: string;
+  customerEmail: string;
+}
 
 /**
  * Creates a Stripe Subscription
  */
-export const createSubscription = functions.https.onCall(async (data, context) => {
+export const createSubscription = functions.https.onCall(async (data: SubscriptionData, context: functions.https.CallableContext) => {
   // Ensure user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -99,7 +136,8 @@ export const createSubscription = functions.https.onCall(async (data, context) =
 
     // Check if user already has a Stripe customer ID
     const userDoc = await admin.firestore().collection('users').doc(userId).get();
-    let customerId = userDoc.exists ? userDoc.data()?.stripeCustomerId : null;
+    const userData = userDoc.exists ? userDoc.data() : null;
+    let customerId = userData?.stripeCustomerId || null;
 
     // If no customer exists, create one
     if (!customerId) {
@@ -175,24 +213,26 @@ export const createSubscription = functions.https.onCall(async (data, context) =
       new Date(endDateMillis)
     );
 
+    // Access the payment intent from the expanded subscription object
+    const latestInvoice = subscription.latest_invoice as any;
+    const paymentIntent = latestInvoice?.payment_intent;
+
     return {
       subscriptionId: subscription.id,
-      clientSecret: subscription.latest_invoice.payment_intent.client_secret,
+      clientSecret: paymentIntent?.client_secret,
       stripeCustomerId: customerId
     };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Subscription creation failed:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      error.message || 'Subscription creation failed'
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Subscription creation failed';
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
 });
 
 /**
  * Cancels a Stripe Subscription
  */
-export const cancelSubscription = functions.https.onCall(async (data, context) => {
+export const cancelSubscription = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
   // Ensure user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -237,7 +277,8 @@ export const cancelSubscription = functions.https.onCall(async (data, context) =
 
     // Get user email for cancellation notification
     const userDoc = await admin.firestore().collection('users').doc(userId).get();
-    const userEmail = userDoc.data()?.email;
+    const userData = userDoc.data();
+    const userEmail = userData?.email;
 
     if (userEmail) {
       // Send cancellation email
@@ -249,19 +290,21 @@ export const cancelSubscription = functions.https.onCall(async (data, context) =
     }
 
     return { success: true };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Subscription cancellation failed:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      error.message || 'Subscription cancellation failed'
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Subscription cancellation failed';
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
 });
+
+interface AutoRenewData {
+  autoRenew: boolean;
+}
 
 /**
  * Toggles auto-renewal for a subscription
  */
-export const toggleAutoRenew = functions.https.onCall(async (data, context) => {
+export const toggleAutoRenew = functions.https.onCall(async (data: AutoRenewData, context: functions.https.CallableContext) => {
   // Ensure user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -304,12 +347,10 @@ export const toggleAutoRenew = functions.https.onCall(async (data, context) => {
     });
 
     return { success: true, autoRenew };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Auto-renew toggle failed:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      error.message || 'Failed to update auto-renewal setting'
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Failed to update auto-renewal setting';
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
 });
 
@@ -317,7 +358,7 @@ export const toggleAutoRenew = functions.https.onCall(async (data, context) => {
  * Validates a user's subscription status
  * Called by the client to verify subscription status is valid
  */
-export const validateSubscription = functions.https.onCall(async (data, context) => {
+export const validateSubscription = functions.https.onCall(async (data: any, context: functions.https.CallableContext) => {
   // Ensure user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -366,20 +407,27 @@ export const validateSubscription = functions.https.onCall(async (data, context)
       endDate: endDate.toDate().toISOString(),
       autoRenew: subscriptionData.autoRenew
     };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Subscription validation failed:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      error.message || 'Failed to validate subscription'
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Failed to validate subscription';
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
 });
+
+// Fix the WebhookRequest interface to properly include headers
+interface WebhookRequest extends functions.https.Request {
+    rawBody: any;
+    headers: {
+      [key: string]: string | string[] | undefined;
+      'stripe-signature'?: string;
+    };
+  }
 
 /**
  * Handles Stripe webhook events for subscription updates
  */
-export const stripeWebhook = functions.https.onRequest(async (req, res) => {
-  const signature = req.headers['stripe-signature'];
+export const stripeWebhook = functions.https.onRequest(async (req: WebhookRequest, res: functions.Response) => {
+  const signature = req.headers['stripe-signature'] as string;
 
   try {
     // Verify webhook signature
@@ -409,20 +457,21 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
     }
 
     res.status(200).send({ received: true });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Webhook error:', error);
-    res.status(400).send(`Webhook Error: ${error.message}`);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown webhook error';
+    res.status(400).send(`Webhook Error: ${errorMessage}`);
   }
 });
 
 /**
  * Handle successful payment webhook
  */
-async function handleSuccessfulPayment(invoice) {
+async function handleSuccessfulPayment(invoice: any) {
   if (invoice.subscription) {
     // This is a subscription payment
     const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
-    const userId = subscription.metadata.userId;
+    const userId = subscription.metadata?.userId;
     
     if (!userId) {
       console.error('No userId found in subscription metadata');
@@ -439,9 +488,9 @@ async function handleSuccessfulPayment(invoice) {
     const subscriptionData = subscriptionDoc.data();
     
     // Calculate new end date based on the subscription plan
-    const planId = subscriptionData.planId;
-    const monthsInPlan = planId.includes('yearly') ? 12 : 1;
-    const currentEndDate = subscriptionData.endDate.toDate();
+    const planId = subscriptionData?.planId;
+    const monthsInPlan = planId?.includes('yearly') ? 12 : 1;
+    const currentEndDate = subscriptionData?.endDate.toDate();
     const newEndDateMillis = currentEndDate.getTime() + (monthsInPlan * 30 * 24 * 60 * 60 * 1000);
     const newEndDate = admin.firestore.Timestamp.fromMillis(newEndDateMillis);
     
@@ -455,17 +504,18 @@ async function handleSuccessfulPayment(invoice) {
     
     // Get user email for renewal notification
     const userDoc = await admin.firestore().collection('users').doc(userId).get();
-    const userEmail = userDoc.data()?.email;
+    const userData = userDoc.data();
+    const userEmail = userData?.email;
     
     if (userEmail) {
       // Get the plan details for the email
-      const plan = STRIPE_PRODUCTS[planId];
+      const plan = planId ? STRIPE_PRODUCTS[planId] : null;
       const amount = plan ? plan.amount / 100 : (invoice.amount_paid / 100);
       
       // Send renewal confirmation email
       await sendRenewalEmail(
         userEmail,
-        planId,
+        planId || 'unknown_plan',
         invoice.id,
         amount,
         new Date(newEndDateMillis)
@@ -477,10 +527,10 @@ async function handleSuccessfulPayment(invoice) {
 /**
  * Handle failed payment webhook
  */
-async function handleFailedPayment(invoice) {
+async function handleFailedPayment(invoice: any) {
   if (invoice.subscription) {
     const subscription = await stripe.subscriptions.retrieve(invoice.subscription);
-    const userId = subscription.metadata.userId;
+    const userId = subscription.metadata?.userId;
     
     if (!userId) {
       console.error('No userId found in subscription metadata');
@@ -489,7 +539,8 @@ async function handleFailedPayment(invoice) {
     
     // Get user email for payment failure notification
     const userDoc = await admin.firestore().collection('users').doc(userId).get();
-    const userEmail = userDoc.data()?.email;
+    const userData = userDoc.data();
+    const userEmail = userData?.email;
     
     if (userEmail) {
       // Get subscription details
@@ -500,7 +551,7 @@ async function handleFailedPayment(invoice) {
         // Send payment failure email
         await sendPaymentFailureEmail(
           userEmail,
-          subscriptionData.planId,
+          subscriptionData?.planId || 'unknown_plan',
           invoice.id,
           invoice.amount_due / 100,
           invoice.next_payment_attempt
@@ -515,8 +566,8 @@ async function handleFailedPayment(invoice) {
 /**
  * Handle subscription canceled webhook
  */
-async function handleSubscriptionCanceled(subscription) {
-  const userId = subscription.metadata.userId;
+async function handleSubscriptionCanceled(subscription: any) {
+  const userId = subscription.metadata?.userId;
   
   if (!userId) {
     console.error('No userId found in subscription metadata');
@@ -533,8 +584,8 @@ async function handleSubscriptionCanceled(subscription) {
 /**
  * Handle subscription updated webhook
  */
-async function handleSubscriptionUpdated(subscription) {
-  const userId = subscription.metadata.userId;
+async function handleSubscriptionUpdated(subscription: any) {
+  const userId = subscription.metadata?.userId;
   
   if (!userId) {
     console.error('No userId found in subscription metadata');
@@ -563,7 +614,7 @@ async function sendSubscriptionEmail(
   subscriptionId: string,
   amount: number,
   endDate: Date
-) {
+): Promise<boolean> {
   const planName = planId
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -642,7 +693,7 @@ async function sendCancellationEmail(
   email: string,
   planId: string,
   endDate: Date
-) {
+): Promise<boolean> {
   const planName = planId
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -712,7 +763,7 @@ async function sendRenewalEmail(
   invoiceId: string,
   amount: number,
   endDate: Date
-) {
+): Promise<boolean> {
   const planName = planId
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -777,7 +828,7 @@ async function sendPaymentFailureEmail(
   invoiceId: string,
   amount: number,
   nextAttemptDate: Date | null
-) {
+): Promise<boolean> {
   const planName = planId
     .split('_')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
@@ -847,10 +898,21 @@ async function sendPaymentFailureEmail(
   }
 }
 
+interface ReceiptEmailData {
+  email: string;
+  purchaseDetails: {
+    amount: number;
+    transactionId: string;
+    purchaseDate: string;
+    productName: string;
+    description: string;
+  };
+}
+
 /**
  * Send receipt email for one-time purchases
  */
-export const sendReceiptEmail = functions.https.onCall(async (data, context) => {
+export const sendReceiptEmail = functions.https.onCall(async (data: ReceiptEmailData, context: functions.https.CallableContext) => {
   // Ensure user is authenticated
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -906,11 +968,9 @@ export const sendReceiptEmail = functions.https.onCall(async (data, context) => 
 
     await emailTransport.sendMail(mailOptions);
     return { success: true };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error sending receipt email:', error);
-    throw new functions.https.HttpsError(
-      'internal',
-      error.message || 'Failed to send receipt email'
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Failed to send receipt email';
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
 });

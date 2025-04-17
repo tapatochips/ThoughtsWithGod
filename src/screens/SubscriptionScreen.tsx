@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -29,8 +29,15 @@ import {
 import { formatDate, formatPrice, validateCreditCard, validateExpDate } from '../utils/paymentUtils';
 import { initializeStripe, presentNativePayUI } from '../services/payment/stripeService';
 
+interface SubscriptionScreenProps {
+  navigation: NavigationProp<ParamListBase>;
+}
 
-const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
+const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) => {
+  const { theme } = useTheme();
+  const { user } = useFirebase();
+  
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -221,8 +228,279 @@ const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
     }
   };
 
-  {/* Payment Form Modal */}
-  {showPaymentForm && (
+  const handleCancelSubscription = async () => {
+    if (!user || !currentSubscription) return;
+    
+    Alert.alert(
+      "Cancel Subscription",
+      "Are you sure you want to cancel your subscription? You'll still have access until the end of your billing period.",
+      [
+        { text: "No", style: "cancel" },
+        {
+          text: "Yes, Cancel",
+          style: "destructive",
+          onPress: async () => {
+            setProcessing(true);
+            try {
+              const success = await cancelSubscription(user.uid);
+              if (success) {
+                const updatedSubscription = await getUserSubscription(user.uid);
+                setCurrentSubscription(updatedSubscription);
+                Alert.alert("Subscription Canceled", "Your subscription has been canceled. You'll have access until the end of your current billing period.");
+              } else {
+                Alert.alert("Error", "Failed to cancel subscription. Please try again.");
+              }
+            } catch (error) {
+              console.error('Error canceling subscription:', error);
+              Alert.alert("Error", "Failed to cancel subscription. Please try again.");
+            } finally {
+              setProcessing(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleToggleAutoRenew = async () => {
+    if (!user || !currentSubscription) return;
+    
+    setProcessing(true);
+    try {
+      const newAutoRenewValue = !currentSubscription.autoRenew;
+      const success = await toggleAutoRenew(user.uid, newAutoRenewValue);
+      
+      if (success) {
+        const updatedSubscription = await getUserSubscription(user.uid);
+        setCurrentSubscription(updatedSubscription);
+        Alert.alert(
+          "Auto-Renewal Updated", 
+          newAutoRenewValue 
+            ? "Your subscription will automatically renew at the end of your billing period." 
+            : "Your subscription will not renew. You'll have access until the end of your current billing period."
+        );
+      } else {
+        Alert.alert("Error", "Failed to update auto-renewal settings. Please try again.");
+      }
+    } catch (error) {
+      console.error('Error updating auto-renewal:', error);
+      Alert.alert("Error", "Failed to update auto-renewal settings. Please try again.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const viewReceipt = () => {
+    if (!currentSubscription) return;
+    
+    navigation.navigate('ReceiptViewer', {
+      transactionId: currentSubscription.transactionId || 'N/A',
+      planName: subscriptionPlans.find(p => p.id === currentSubscription.planId)?.name || 'Subscription',
+      amount: subscriptionPlans.find(p => p.id === currentSubscription.planId)?.price || 0,
+      purchaseDate: currentSubscription.startDate.toDate().toISOString(),
+      status: currentSubscription.status
+    });
+  };
+
+  // Helper function for consistent shadow styling
+  const getShadowStyle = (theme: any) => {
+    if (Platform.OS === 'ios') {
+      return {
+        shadowColor: theme.colors.shadow,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 5,
+      };
+    } else {
+      return {
+        elevation: 3,
+      };
+    }
+  };
+
+  const renderCurrentSubscription = () => (
+    <View style={[styles.subscriptionCard, { backgroundColor: theme.colors.card, ...getShadowStyle(theme) }]}>
+      <View style={styles.subscriptionHeader}>
+        <Text style={[styles.subscriptionTitle, { color: theme.colors.text }]}>
+          Current Subscription
+        </Text>
+        
+        <View style={[
+          styles.statusBadge, 
+          { 
+            backgroundColor: 
+              currentSubscription?.status === 'active' ? `${theme.colors.success}20` :
+              currentSubscription?.status === 'canceled' ? `${theme.colors.warning}20` : 
+              `${theme.colors.danger}20` 
+          }
+        ]}>
+          <Text style={[
+            styles.statusText, 
+            {
+              color: 
+                currentSubscription?.status === 'active' ? theme.colors.success :
+                currentSubscription?.status === 'canceled' ? theme.colors.warning : 
+                theme.colors.danger
+            }
+          ]}>
+            {currentSubscription?.status === 'active' ? 'Active' : 
+             currentSubscription?.status === 'canceled' ? 'Canceled' : 'Expired'}
+          </Text>
+        </View>
+      </View>
+      
+      <View style={styles.subscriptionDetails}>
+        <View style={styles.subscriptionDetail}>
+          <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>Plan:</Text>
+          <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+            {subscriptionPlans.find(p => p.id === currentSubscription?.planId)?.name}
+          </Text>
+        </View>
+        
+        <View style={styles.subscriptionDetail}>
+          <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>Price:</Text>
+          <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+            {formatPrice(subscriptionPlans.find(p => p.id === currentSubscription?.planId)?.price || 0)}
+            {currentSubscription?.planId.includes('yearly') ? '/year' : '/month'}
+          </Text>
+        </View>
+        
+        <View style={styles.subscriptionDetail}>
+          <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>Renewal Date:</Text>
+          <Text style={[styles.detailValue, { color: theme.colors.text }]}>
+            {currentSubscription?.endDate ? formatDate(currentSubscription.endDate.toDate().toISOString()) : 'N/A'}
+          </Text>
+        </View>
+        
+        <View style={styles.subscriptionDetail}>
+          <Text style={[styles.detailLabel, { color: theme.colors.textSecondary }]}>Auto-Renewal:</Text>
+          <Text style={[styles.detailValue, { color: currentSubscription?.autoRenew ? theme.colors.success : theme.colors.danger }]}>
+            {currentSubscription?.autoRenew ? 'Enabled' : 'Disabled'}
+          </Text>
+        </View>
+      </View>
+      
+      <View style={styles.subscriptionActions}>
+        <TouchableOpacity 
+          style={[styles.actionButton, { backgroundColor: theme.colors.primary }]}
+          onPress={viewReceipt}
+        >
+          <Ionicons name="receipt-outline" size={20} color="white" />
+          <Text style={styles.actionButtonText}>View Receipt</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.actionButton, { 
+            backgroundColor: currentSubscription?.autoRenew ? theme.colors.danger : theme.colors.success 
+          }]}
+          onPress={handleToggleAutoRenew}
+          disabled={processing}
+        >
+          {processing ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <>
+              <Ionicons 
+                name={currentSubscription?.autoRenew ? "close-circle-outline" : "refresh-outline"} 
+                size={20} 
+                color="white" 
+              />
+              <Text style={styles.actionButtonText}>
+                {currentSubscription?.autoRenew ? 'Cancel Auto-Renewal' : 'Enable Auto-Renewal'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+        
+        {currentSubscription?.status === 'active' && (
+          <TouchableOpacity 
+            style={[styles.cancelButton, { borderColor: theme.colors.danger }]}
+            onPress={handleCancelSubscription}
+            disabled={processing}
+          >
+            <Text style={[styles.cancelButtonText, { color: theme.colors.danger }]}>
+              Cancel Subscription
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+
+  const renderPlans = () => (
+    <View>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
+        {currentSubscription ? 'Available Plans' : 'Choose a Subscription Plan'}
+      </Text>
+      
+      {subscriptionPlans.map(plan => (
+        <TouchableOpacity 
+          key={plan.id}
+          style={[
+            styles.planCard, 
+            { 
+              backgroundColor: theme.colors.card,
+              ...getShadowStyle(theme) 
+            },
+            selectedPlan?.id === plan.id && { borderColor: theme.colors.primary, borderWidth: 2 }
+          ]}
+          onPress={() => setSelectedPlan(plan)}
+        >
+          <View style={styles.planHeader}>
+            <Text style={[styles.planName, { color: theme.colors.text }]}>{plan.name}</Text>
+            <Text style={[styles.planPrice, { color: theme.colors.primary }]}>
+              {formatPrice(plan.price)}{plan.durationMonths === 1 ? '/month' : '/year'}
+            </Text>
+          </View>
+          
+          <Text style={[styles.planDescription, { color: theme.colors.textSecondary }]}>
+            {plan.description}
+          </Text>
+          
+          <View style={styles.featuresContainer}>
+            {plan.features.map((feature, index) => (
+              <View key={index} style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={18} color={theme.colors.success} />
+                <Text style={[styles.featureText, { color: theme.colors.text }]}>
+                  {feature}
+                </Text>
+              </View>
+            ))}
+          </View>
+          
+          {selectedPlan?.id === plan.id && !currentSubscription && (
+            <TouchableOpacity 
+              style={[styles.subscribeButton, { backgroundColor: theme.colors.primary }]}
+              onPress={() => setShowPaymentForm(true)}
+            >
+              <Text style={styles.subscribeButtonText}>Subscribe Now</Text>
+            </TouchableOpacity>
+          )}
+          
+          {currentSubscription && currentSubscription.planId === plan.id && (
+            <View style={[
+              styles.currentPlanBadge, 
+              { backgroundColor: theme.colors.success }
+            ]}>
+              <Text style={styles.currentPlanText}>Current Plan</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      ))}
+      
+      <View style={styles.guaranteeContainer}>
+        <Ionicons name="shield-checkmark-outline" size={30} color={theme.colors.success} />
+        <Text style={[styles.guaranteeText, { color: theme.colors.text }]}>
+          30-Day Money Back Guarantee
+        </Text>
+        <Text style={[styles.guaranteeDescription, { color: theme.colors.textSecondary }]}>
+          If you're not completely satisfied, simply cancel within the first 30 days for a full refund.
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderPaymentForm = () => (
     <View style={[styles.paymentForm, { backgroundColor: theme.colors.card, ...getShadowStyle(theme) }]}>
       <View style={styles.paymentHeader}>
         <Text style={[styles.paymentTitle, { color: theme.colors.text }]}>Payment Method</Text>
@@ -330,7 +608,7 @@ const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
                 placeholder="CVC"
                 placeholderTextColor={theme.colors.secondary}
                 value={cardCVC}
-                onChangeText={(text) => setCardCVC(text.replace(/[^0-9]/g, ''))}
+                onChangeText={(text) => setCVC(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
                 maxLength={4}
                 editable={!processing}
@@ -399,12 +677,242 @@ const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
         </Text>
       </View>
     </View>
-  )}
+  );
 
-  securePaymentText: {
-    fontSize: 12,
-    marginLeft: 6,
+  if (loading) {
+    return (
+      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={[styles.message, { color: theme.colors.text }]}>
+          Loading subscription information...
+        </Text>
+      </View>
+    );
+  }
+
+  if (!user) {
+    return (
+      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+        <Ionicons name="person-circle-outline" size={48} color={theme.colors.primary} />
+        <Text style={[styles.message, { color: theme.colors.text }]}>
+          Please log in to access subscription features.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {currentSubscription && renderCurrentSubscription()}
+        {renderPlans()}
+      </ScrollView>
+      
+      {showPaymentForm && renderPaymentForm()}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  message: {
+    fontSize: 16,
     textAlign: 'center',
+    marginTop: 16,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginVertical: 16,
+  },
+  subscriptionCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  subscriptionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  subscriptionDetails: {
+    marginBottom: 16,
+  },
+  subscriptionDetail: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  detailValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  subscriptionActions: {
+    marginTop: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  actionButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  cancelButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontWeight: '600',
+  },
+  planCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  planHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  planName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  planPrice: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  planDescription: {
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  featuresContainer: {
+    marginBottom: 16,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  featureText: {
+    marginLeft: 8,
+    fontSize: 14,
+  },
+  subscribeButton: {
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  subscribeButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  currentPlanBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 12,
+  },
+  currentPlanText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  guaranteeContainer: {
+    alignItems: 'center',
+    padding: 20,
+    marginBottom: 20,
+  },
+  guaranteeText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 8,
+  },
+  guaranteeDescription: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  paymentForm: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    maxHeight: '90%',
+  },
+  paymentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  paymentTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  paymentOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  paymentOption: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    width: '48%',
+  },
+  paymentOptionText: {
+    marginTop: 8,
+    fontWeight: '500',
   },
   cardInputContainer: {
     marginBottom: 20,
@@ -434,8 +942,63 @@ const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
     marginTop: -6,
     marginBottom: 12,
   },
-  guarantee: {
-    alignItems: 'center',
-    padding: 20,
+  orderSummary: {
     marginBottom: 20,
   },
+  orderSummaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  orderDetail: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  orderDetailLabel: {
+    fontSize: 14,
+  },
+  orderDetailValue: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  orderTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    marginTop: 8,
+    borderTopWidth: 1,
+  },
+  orderTotalLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  orderTotalValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  payButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  payButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  securePaymentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  securePaymentText: {
+    fontSize: 12,
+    marginLeft: 6,
+    textAlign: 'center',
+  },
+});
+
+export default SubscriptionScreen;

@@ -3,8 +3,8 @@
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { db } from './firebaseConfig';
-import { functions } from './firebaseFunctions';
-import { createPaymentMethod, processPayment, createSubscription as stripeCreateSubscription } from '../payment/stripeService';
+import { functions, httpsCallable } from './firebaseFunctions';
+import { createPaymentMethod, createSubscription as stripeCreateSubscription } from '../payment/stripeService';
 import { formatDate } from '../../utils/paymentUtils';
 
 export interface SubscriptionPlan {
@@ -149,14 +149,18 @@ export async function createSubscription(
     }
     
     // Call Firebase Function to create subscription
-    const createSubscriptionFunction = functions.httpsCallable('createSubscription');
+    if (!functions) {
+      return { success: false, error: 'Firebase functions not available' };
+    }
+    
+    const createSubscriptionFunction = httpsCallable(functions, 'createSubscription');
     const result = await createSubscriptionFunction({
       planId,
       paymentMethodId,
       customerEmail: user.email
     });
     
-    const { subscriptionId, stripeCustomerId } = result.data;
+    const { subscriptionId, stripeCustomerId } = result.data as { subscriptionId: string; stripeCustomerId: string };
     
     // Subscription should be created in Firestore by the Cloud Function
     // But we'll fetch it to return to the client
@@ -167,7 +171,11 @@ export async function createSubscription(
     }
     
     // Send receipt email
-    const sendReceiptFunction = functions.httpsCallable('sendReceiptEmail');
+    if (!functions) {
+      return { success: true, subscription };
+    }
+    
+    const sendReceiptFunction = httpsCallable(functions, 'sendReceiptEmail');
     await sendReceiptFunction({
       email: user.email,
       purchaseDetails: {
@@ -193,8 +201,10 @@ export async function createSubscription(
 export async function cancelSubscription(userId: string): Promise<boolean> {
   try {
     // Call Firebase Function to cancel subscription
-    const cancelSubscriptionFunction = functions.httpsCallable('cancelSubscription');
-    await cancelSubscriptionFunction();
+    if (!functions) return false;
+    
+    const cancelSubscriptionFunction = httpsCallable(functions, 'cancelSubscription');
+    await cancelSubscriptionFunction({});
     
     return true;
   } catch (error) {
@@ -205,9 +215,13 @@ export async function cancelSubscription(userId: string): Promise<boolean> {
 
 // Toggle auto-renewal setting
 export async function toggleAutoRenew(userId: string, autoRenew: boolean): Promise<boolean> {
+  if (!db) return false;
+  
   try {
+    if (!functions) return false;
+    
     // Call Firebase Function to toggle auto-renew
-    const toggleAutoRenewFunction = functions.httpsCallable('toggleAutoRenew');
+    const toggleAutoRenewFunction = httpsCallable(functions, 'toggleAutoRenew');
     await toggleAutoRenewFunction({ autoRenew });
     
     return true;
@@ -225,11 +239,18 @@ export async function validateSubscription(userId: string): Promise<{
   autoRenew?: boolean;
 }> {
   try {
-    // Call Firebase Function to validate subscription
-    const validateSubscriptionFunction = functions.httpsCallable('validateSubscription');
-    const result = await validateSubscriptionFunction();
+    if (!functions) return { active: false };
     
-    return result.data;
+    // Call Firebase Function to validate subscription
+    const validateSubscriptionFunction = httpsCallable(functions, 'validateSubscription');
+    const result = await validateSubscriptionFunction({});
+    
+    return result.data as {
+      active: boolean;
+      plan?: string;
+      endDate?: string;
+      autoRenew?: boolean;
+    };
   } catch (error) {
     console.error('Error validating subscription:', error);
     return { active: false };
@@ -250,105 +271,89 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
   }
 }
 
-// Create a simple Firebase Functions wrapper
+// Process a payment
 export async function processPayment(
-    user: User,
-    planId: string,
-    paymentDetails: {
-      cardNumber?: string;
-      expMonth?: number;
-      expYear?: number;
-      cvc?: string;
-      paymentType: 'credit_card' | 'google_pay' | 'apple_pay';
-    }
-  ): Promise<{
-    success: boolean;
-    transactionId?: string;
-    error?: string;
-  }> {
-    const selectedPlan = subscriptionPlans.find(plan => plan.id === planId);
-    if (!selectedPlan) {
-      return {
-        success: false,
-        error: 'Invalid subscription plan'
-      };
-    }
-  
-    try {
-      // Create payment method with Stripe
-      let paymentMethodId: string | null = null;
+  user: User,
+  planId: string,
+  paymentDetails: {
+    cardNumber?: string;
+    expMonth?: number;
+    expYear?: number;
+    cvc?: string;
+    paymentType: 'credit_card' | 'google_pay' | 'apple_pay';
+  }
+): Promise<{
+  success: boolean;
+  transactionId?: string;
+  error?: string;
+}> {
+  const selectedPlan = subscriptionPlans.find(plan => plan.id === planId);
+  if (!selectedPlan) {
+    return {
+      success: false,
+      error: 'Invalid subscription plan'
+    };
+  }
+
+  try {
+    // Create payment method with Stripe
+    let paymentMethodId: string | null = null;
+    
+    if (paymentDetails.paymentType === 'credit_card' && 
+        paymentDetails.cardNumber && 
+        paymentDetails.expMonth && 
+        paymentDetails.expYear && 
+        paymentDetails.cvc) {
       
-      if (paymentDetails.paymentType === 'credit_card' && 
-          paymentDetails.cardNumber && 
-          paymentDetails.expMonth && 
-          paymentDetails.expYear && 
-          paymentDetails.cvc) {
-        
-        paymentMethodId = await createPaymentMethod({
-          number: paymentDetails.cardNumber,
-          expMonth: paymentDetails.expMonth,
-          expYear: paymentDetails.expYear,
-          cvc: paymentDetails.cvc
-        });
-      } else {
-        // For Apple Pay / Google Pay, we'd handle that differently
-        // This is a simplified example
-        paymentMethodId = `pm_${Math.random().toString(36).substring(2, 15)}`;
-      }
-      
-      if (!paymentMethodId) {
-        return {
-          success: false,
-          error: 'Failed to create payment method'
-        };
-      }
-      
-      // Process the payment using the Cloud Function
-      const createPaymentIntentFunction = functions.httpsCallable('createPaymentIntent');
-      const result = await createPaymentIntentFunction({
-        amount: Math.round(selectedPlan.price * 100), // Convert to cents
-        currency: 'usd',
-        paymentMethodId,
-        description: `${selectedPlan.name} Subscription`,
-        metadata: {
-          planId,
-          userId: user.uid
-        },
-        receiptEmail: user.email
+      paymentMethodId = await createPaymentMethod({
+        number: paymentDetails.cardNumber,
+        expMonth: paymentDetails.expMonth,
+        expYear: paymentDetails.expYear,
+        cvc: paymentDetails.cvc
       });
-      
-      return {
-        success: true,
-        transactionId: result.data.transactionId,
-      };
-    } catch (error) {
-      console.error('Payment processing failed:', error);
+    } else {
+      // For Apple Pay / Google Pay, we'd handle that differently
+      // This is a simplified example
+      paymentMethodId = `pm_${Math.random().toString(36).substring(2, 15)}`;
+    }
+    
+    if (!paymentMethodId) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown payment error'
+        error: 'Failed to create payment method'
       };
     }
+    
+    if (!functions) {
+      return {
+        success: false,
+        error: 'Firebase functions not available'
+      };
+    }
+    
+    // Process the payment using the Cloud Function
+    const createPaymentIntentFunction = httpsCallable(functions, 'createPaymentIntent');
+    const result = await createPaymentIntentFunction({
+      amount: Math.round(selectedPlan.price * 100), // Convert to cents
+      currency: 'usd',
+      paymentMethodId,
+      description: `${selectedPlan.name} Subscription`,
+      metadata: {
+        planId,
+        userId: user.uid
+      },
+      receiptEmail: user.email
+    });
+    
+    return {
+      success: true,
+      transactionId: (result.data as any).transactionId,
+    };
+  } catch (error) {
+    console.error('Payment processing failed:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown payment error'
+    };
   }
-
-  await updateDoc(subscriptionRef, { 
-    status: 'canceled',
-    autoRenew: false
-  });
-  
-  return true;
-}
-
-// Toggle auto-renewal setting
-export async function toggleAutoRenew(userId: string, autoRenew: boolean): Promise<boolean> {
-  if (!db) throw new Error('Database not available');
-  
-  const subscriptionRef = doc(db, 'subscriptions', userId);
-  const subscriptionDoc = await getDoc(subscriptionRef);
-  
-  if (!subscriptionDoc.exists()) {
-    throw new Error('No subscription found');
-  }
-  
-  await updateDoc(subscriptionRef, { autoRenew });
-  return true;
 }

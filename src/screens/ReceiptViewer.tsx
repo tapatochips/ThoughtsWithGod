@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -60,13 +60,13 @@ const ReceiptViewer: React.FC = () => {
   
   // Resend receipt email
   const handleResendEmail = async () => {
-    if (!user || !user.email) return;
+    if (!user || !user.email || !functions) return;
     
     try {
       setResendingReceipt(true);
       
       // Call the Cloud Function to send receipt email
-      const sendReceiptEmailFunction = functions.httpsCallable('sendReceiptEmail');
+      const sendReceiptEmailFunction = httpsCallable(functions, 'sendReceiptEmail');
       await sendReceiptEmailFunction({
         email: user.email,
         purchaseDetails: {

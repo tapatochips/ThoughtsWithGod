@@ -1,10 +1,8 @@
-// src/services/firebase/firebaseFunctions.tsx
-
-import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
+import { getFunctions, httpsCallable, connectFunctionsEmulator, Functions } from 'firebase/functions';
 import { firebaseInstance } from './firebaseConfig';
 
 // Initialize Firebase Functions
-let functions;
+let functions: Functions | null = null;
 
 if (firebaseInstance.app) {
   functions = getFunctions(firebaseInstance.app);
@@ -13,8 +11,10 @@ if (firebaseInstance.app) {
   if (process.env.NODE_ENV === 'development') {
     try {
       // Connect to the local emulator if running locally
-      connectFunctionsEmulator(functions, 'localhost', 5001);
-      console.log('Connected to Functions emulator');
+      if (functions) {
+        connectFunctionsEmulator(functions, 'localhost', 5001);
+        console.log('Connected to Functions emulator');
+      }
     } catch (error) {
       console.error('Failed to connect to Functions emulator:', error);
     }
