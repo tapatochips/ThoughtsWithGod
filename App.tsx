@@ -3,19 +3,21 @@ import { StyleSheet, Text, View, ActivityIndicator, AppState, AppStateStatus } f
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
-// Screens
+// screens
 import VerseDisplay from './src/screens/VerseDisplay';
 import AuthScreen from './src/screens/AuthScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import PrayerBoard from './src/screens/PrayerBoard';
 import ProfileSetup from './src/screens/ProfileSetup';
+import SubscriptionScreen from './src/screens/SubscriptionScreen';
+import ReceiptViewer from './src/screens/ReceiptViewer';
 
-// Providers
+// providers
 import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeProvider';
 import ErrorBoundary from './src/components/common/ErrorBoundary';
 
-// Mock notifications
+// mock notifications
 import { 
   registerForPushNotificationsAsync, 
   scheduleDailyVerseReminder,
@@ -34,30 +36,30 @@ const AppContent = () => {
   const notificationListener = useRef<any>();
   const responseListener = useRef<any>();
 
-  // Setup notification listeners
+  // setup notification listeners
   useEffect(() => {
     if (user) {
-      // Register for notifications
+      // register for notifications
       registerForPushNotificationsAsync().then(token => {
         console.log('Push token:', token);
       });
 
-      // Set up notification listeners
+      // set up notification listeners
       notificationListener.current = setupNotificationListener(notification => {
         console.log('Notification received:', notification);
       });
 
       responseListener.current = setupNotificationResponseListener(response => {
         console.log('Notification response received:', response);
-        // Handle navigation if needed based on notification content
+        // handle nav if needed based on notification content
       });
 
-      // Schedule daily reminder if user has enabled it
+      // schedule daily reminder if user has enabled it
       scheduleDailyVerseReminder(user.uid);
     }
 
     return () => {
-      // Clean up listeners when component unmounts
+      //clean listeners when component unmounts
       if (notificationListener.current) {
         notificationListener.current.remove();
       }
@@ -67,7 +69,7 @@ const AppContent = () => {
     };
   }, [user, userProfile?.preferences?.reminders, userProfile?.preferences?.reminderTime]);
 
-  // Listen for app state changes to reschedule notifications
+  //listen for app state changes to reschedule notifications
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
       if (
@@ -76,7 +78,7 @@ const AppContent = () => {
         user
       ) {
         console.log("App has come to the foreground!");
-        // Re-schedule notifications when app comes to foreground
+        //re-schedule notifications when app comes to foreground
         scheduleDailyVerseReminder(user.uid);
       }
 
@@ -88,7 +90,7 @@ const AppContent = () => {
     };
   }, [user]);
 
-  // Firebase initialization check
+  //firebase initialization check
   useEffect(() => {
     if (firebaseInstance.isAppInitialized()) {
       console.log("Firebase initialized successfully");
@@ -119,7 +121,7 @@ const AppContent = () => {
     );
   }
 
-// Define the navigation theme based on our custom theme
+//define the navigation theme based on our custom theme
 const navigationTheme = {
     dark: theme.name === 'dark',
     colors: {
@@ -130,7 +132,7 @@ const navigationTheme = {
       border: theme.colors.border,
       notification: theme.colors.primary,
     },
-    //Using exact string literals for fontWeight as required by the Theme type
+    //using exact string literals for fontWeight as required by the Theme type
     fonts: {
       regular: {
         fontFamily: 'System',
@@ -185,6 +187,16 @@ const navigationTheme = {
               name="ProfileSetup" 
               component={ProfileSetup} 
               options={{ title: "Profile Settings" }}
+            />
+            <Stack.Screen 
+              name="Subscription" 
+              component={SubscriptionScreen} 
+              options={{ title: "Premium Subscription" }}
+            />
+            <Stack.Screen 
+              name="ReceiptViewer" 
+              component={ReceiptViewer} 
+              options={{ title: "Receipt" }}
             />
           </>
         ) : (

@@ -127,7 +127,7 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
     const getThemedVerseText = (text: string) => {
         if (!text) return '';
         
-        const fontSize = getFontSize();
+        const fontSize = theme.fontSize.md;
         
         // Replace all text-containing elements to ensure proper theme colors
         return text

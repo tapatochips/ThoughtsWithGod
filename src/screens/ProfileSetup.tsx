@@ -7,7 +7,8 @@ import {
   Button, 
   Alert,
   TouchableOpacity,
-  ScrollView
+  ScrollView,
+  Platform
 } from 'react-native';
 import { useFirebase } from '../context/FirebaseContext';
 import { updateUsername, updateUserPreferences } from '../services/firebase/userProfile';
@@ -20,7 +21,7 @@ interface ProfileSetupProps {
 
 const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
   const { user, userProfile, refreshUserProfile } = useFirebase();
-  const { theme, setThemePreference } = useTheme();
+  const { theme, setThemePreference, setFontSizePreference } = useTheme();
   const [username, setUsername] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark' | 'sepia'>('light');
   const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>('medium');
@@ -48,11 +49,8 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
       // Update preferences
       await updateUserPreferences(user.uid, {
         theme: selectedTheme,
-        fontSize
+        fontSize: fontSize
       });
-      
-      // Update theme immediately in the app
-      setThemePreference(selectedTheme);
       
       await refreshUserProfile();
       Alert.alert('Success', 'Profile updated successfully!');
@@ -63,6 +61,18 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Handle theme selection with immediate update
+  const handleThemeChange = (theme: 'light' | 'dark' | 'sepia') => {
+    setSelectedTheme(theme);
+    setThemePreference(theme);
+  };
+
+  // Handle font size selection with immediate update
+  const handleFontSizeChange = (size: 'small' | 'medium' | 'large') => {
+    setFontSize(size);
+    setFontSizePreference(size);
   };
 
   if (!user || !userProfile) {
@@ -77,7 +87,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
     <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <Text style={[styles.title, { color: theme.colors.text }]}>Profile Settings</Text>
       
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>User Information</Text>
         <Text style={[styles.label, { color: theme.colors.text }]}>Email</Text>
         <Text style={[styles.email, { color: theme.colors.secondary }]}>{user.email}</Text>
@@ -99,7 +109,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
         </Text>
       </View>
       
-      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Theme Settings</Text>
         <View style={styles.themeContainer}>
           <TouchableOpacity 
@@ -107,7 +117,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
               styles.themeOption, 
               { borderColor: selectedTheme === 'light' ? theme.colors.primary : 'transparent' }
             ]}
-            onPress={() => setSelectedTheme('light')}
+            onPress={() => handleThemeChange('light')}
           >
             <View style={[styles.themePreview, styles.lightTheme, { borderColor: theme.colors.border }]} />
             <Text style={{ color: theme.colors.text }}>Light</Text>
@@ -118,7 +128,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
               styles.themeOption, 
               { borderColor: selectedTheme === 'dark' ? theme.colors.primary : 'transparent' }
             ]}
-            onPress={() => setSelectedTheme('dark')}
+            onPress={() => handleThemeChange('dark')}
           >
             <View style={[styles.themePreview, styles.darkTheme, { borderColor: theme.colors.border }]} />
             <Text style={{ color: theme.colors.text }}>Dark</Text>
@@ -129,7 +139,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
               styles.themeOption, 
               { borderColor: selectedTheme === 'sepia' ? theme.colors.primary : 'transparent' }
             ]}
-            onPress={() => setSelectedTheme('sepia')}
+            onPress={() => handleThemeChange('sepia')}
           >
             <View style={[styles.themePreview, styles.sepiaTheme, { borderColor: theme.colors.border }]} />
             <Text style={{ color: theme.colors.text }}>Sepia</Text>
@@ -146,7 +156,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
                 backgroundColor: fontSize === 'small' ? `${theme.colors.primary}20` : 'transparent'
               }
             ]}
-            onPress={() => setFontSize('small')}
+            onPress={() => handleFontSizeChange('small')}
           >
             <Text style={{ fontSize: 14, color: theme.colors.text }}>Small</Text>
           </TouchableOpacity>
@@ -159,7 +169,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
                 backgroundColor: fontSize === 'medium' ? `${theme.colors.primary}20` : 'transparent'
               }
             ]}
-            onPress={() => setFontSize('medium')}
+            onPress={() => handleFontSizeChange('medium')}
           >
             <Text style={{ fontSize: 18, color: theme.colors.text }}>Medium</Text>
           </TouchableOpacity>
@@ -172,21 +182,54 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
                 backgroundColor: fontSize === 'large' ? `${theme.colors.primary}20` : 'transparent'
               }
             ]}
-            onPress={() => setFontSize('large')}
+            onPress={() => handleFontSizeChange('large')}
           >
             <Text style={{ fontSize: 22, color: theme.colors.text }}>Large</Text>
           </TouchableOpacity>
         </View>
+
+        <View style={styles.fontPreviewContainer}>
+          <Text style={[styles.fontPreviewLabel, { color: theme.colors.textSecondary }]}>Preview:</Text>
+          <View style={[styles.fontPreview, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <Text style={[styles.fontPreviewText, { 
+              color: theme.colors.text,
+              fontSize: fontSize === 'small' ? 14 : fontSize === 'medium' ? 16 : 18  
+            }]}>
+              This is how your text will appear throughout the app.
+            </Text>
+          </View>
+        </View>
       </View>
       
-      <Button 
-        title={isSaving ? "Saving..." : "Save Settings"}
+      <TouchableOpacity 
+        style={[
+          styles.saveButton, 
+          { backgroundColor: theme.colors.primary },
+          isSaving && { opacity: 0.7 }
+        ]}
         onPress={handleSave}
         disabled={isSaving}
-        color={theme.colors.primary}
-      />
+      >
+        <Text style={styles.saveButtonText}>{isSaving ? "Saving..." : "Save Settings"}</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
+};
+
+// Helper function for consistent shadow styling
+const getShadowStyle = (theme: any) => {
+  if (Platform.OS === 'ios') {
+      return {
+          shadowColor: theme.colors.shadow,
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.8,
+          shadowRadius: 3,
+      };
+  } else {
+      return {
+          elevation: 3,
+      };
+  }
 };
 
 const styles = StyleSheet.create({
@@ -202,9 +245,9 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 24,
-    borderRadius: 8,
+    borderRadius: 16,
     padding: 16,
-    borderWidth: 1,
+    borderWidth: 0,
   },
   sectionTitle: {
     fontSize: 18,
@@ -217,7 +260,7 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderRadius: 4,
+    borderRadius: 8,
     padding: 12,
     fontSize: 16,
     marginBottom: 8,
@@ -239,7 +282,7 @@ const styles = StyleSheet.create({
   themeContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 24,
   },
   themeOption: {
     alignItems: 'center',
@@ -271,10 +314,36 @@ const styles = StyleSheet.create({
   },
   fontSizeOption: {
     alignItems: 'center',
-    padding: 8,
+    padding: 12,
     borderRadius: 8,
     borderWidth: 2,
     width: '30%',
+  },
+  fontPreviewContainer: {
+    marginTop: 8,
+  },
+  fontPreviewLabel: {
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  fontPreview: {
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  fontPreviewText: {
+    lineHeight: 24,
+  },
+  saveButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   }
 });
 

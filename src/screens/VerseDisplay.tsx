@@ -154,7 +154,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     const getTaggedVerseText = () => {
         if (!currentVerse) return '';
         
-        const fontSize = getFontSize();
+        const fontSize = theme.fontSize.md;
         
         // Replace all text-containing elements to ensure proper theme colors
         return currentVerse.text
