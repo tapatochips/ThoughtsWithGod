@@ -7,11 +7,13 @@ import * as nodemailer from 'nodemailer';
 admin.initializeApp();
 
 // Initialize Stripe with your secret key
+/*
 const stripe = new Stripe('sk_test_51MzRYtSI8hYPG1dZyY8XHLk3qTPijK0Q8AnJ1jHEqt6Vk9NgrJLyNAGk07KvQIwJKlYASDPxuNkEfVnZv0IHyUEm00X5jWOo0', {
   apiVersion: '2022-11-15',  // Use the latest API version
 });
-
+*/
 // Initialize Nodemailer for sending emails
+/*
 const emailTransport = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -19,7 +21,7 @@ const emailTransport = nodemailer.createTransport({
     pass: 'app-specific-password'       // Use app-specific password for security
   }
 });
-
+*/
 // Stripe Product IDs for subscription plans
 // These would be created in your Stripe dashboard
 const STRIPE_PRODUCTS = {
