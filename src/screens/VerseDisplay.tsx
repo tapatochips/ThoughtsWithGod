@@ -299,6 +299,21 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                 </TouchableOpacity>
                             </View>
 
+                            {/* Add this new button for subscription */}
+                            <TouchableOpacity 
+                              style={[styles.profileNavButton, { 
+                                backgroundColor: theme.colors.surface,
+                                ...getShadowStyle(theme),
+                                marginBottom: 12  // Add some spacing
+                              }]} 
+                              onPress={() => navigation.navigate('Subscription')}
+                            >
+                              <Ionicons name="star-outline" size={22} color={theme.colors.primary} />
+                              <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                Premium Subscription
+                              </Text>
+                            </TouchableOpacity>
+
                             <TouchableOpacity 
                                 style={[styles.profileNavButton, { 
                                     backgroundColor: theme.colors.surface,

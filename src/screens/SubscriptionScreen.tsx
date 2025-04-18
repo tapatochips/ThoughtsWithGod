@@ -49,6 +49,25 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
   const [cardError, setCardError] = useState<string | null>(null);
   const [validatingSubscription, setValidatingSubscription] = useState(false);
 
+  // Debug logs to check component rendering
+  useEffect(() => {
+    console.log('SubscriptionScreen rendered');
+    console.log('User:', user?.email);
+    console.log('Subscription plans:', subscriptionPlans);
+  }, []);
+
+  // Safety timeout to prevent infinite loading
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (loading) {
+        console.log('Forcing loading state to false after timeout');
+        setLoading(false);
+      }
+    }, 5000); // Force loading to end after 5 seconds
+    
+    return () => clearTimeout(timer);
+  }, [loading]);
+
   // Initialize Stripe on component mount
   useEffect(() => {
     const initStripe = async () => {
@@ -68,13 +87,16 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
 
       try {
         setValidatingSubscription(true);
+        console.log('Validating subscription for user:', user.uid);
         
         // First, validate with the server
         const validation = await validateSubscription(user.uid);
+        console.log('Validation result:', validation);
         
         if (validation.active) {
           // Get full subscription details from Firestore
           const subscription = await getUserSubscription(user.uid);
+          console.log('Subscription details:', subscription);
           setCurrentSubscription(subscription);
           
           // If user has a subscription, preselect that plan
@@ -92,7 +114,9 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
         
         // Fallback to local database check if server validation fails
         try {
+          console.log('Falling back to local subscription check');
           const subscription = await getUserSubscription(user.uid);
+          console.log('Local subscription check result:', subscription);
           setCurrentSubscription(subscription);
           
           if (subscription) {
@@ -428,7 +452,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
   );
 
   const renderPlans = () => (
-    <View>
+    <View style={styles.plansContainer}>
       <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
         {currentSubscription ? 'Available Plans' : 'Choose a Subscription Plan'}
       </Text>
@@ -442,9 +466,13 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
               backgroundColor: theme.colors.card,
               ...getShadowStyle(theme) 
             },
-            selectedPlan?.id === plan.id && { borderColor: theme.colors.primary, borderWidth: 2 }
+            selectedPlan?.id === plan.id && { 
+              borderColor: theme.colors.primary, 
+              borderWidth: 2 
+            }
           ]}
           onPress={() => setSelectedPlan(plan)}
+          activeOpacity={0.8}
         >
           <View style={styles.planHeader}>
             <Text style={[styles.planName, { color: theme.colors.text }]}>{plan.name}</Text>
@@ -472,7 +500,9 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
             <TouchableOpacity 
               style={[styles.subscribeButton, { backgroundColor: theme.colors.primary }]}
               onPress={() => setShowPaymentForm(true)}
+              activeOpacity={0.7}
             >
+              <Ionicons name="card-outline" size={18} color="white" style={{ marginRight: 6 }} />
               <Text style={styles.subscribeButtonText}>Subscribe Now</Text>
             </TouchableOpacity>
           )}
@@ -608,7 +638,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
                 placeholder="CVC"
                 placeholderTextColor={theme.colors.secondary}
                 value={cardCVC}
-                onChangeText={(text) => setCVC(text.replace(/[^0-9]/g, ''))}
+                onChangeText={(text) => setCardCVC(text.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
                 maxLength={4}
                 editable={!processing}
@@ -732,6 +762,9 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
+  plansContainer: {
+    paddingHorizontal: 8,  // Add some horizontal padding
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -840,9 +873,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   subscribeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 12,
     borderRadius: 8,
-    alignItems: 'center',
     marginTop: 8,
   },
   subscribeButtonText: {

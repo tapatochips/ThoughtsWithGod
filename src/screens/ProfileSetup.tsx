@@ -14,6 +14,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { updateUsername, updateUserPreferences } from '../services/firebase/userProfile';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeProvider';
+import { Ionicons } from '@expo/vector-icons';
 
 interface ProfileSetupProps {
   navigation: NavigationProp<ParamListBase>;
@@ -201,6 +202,33 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
         </View>
       </View>
       
+      {/* New Premium Features Section */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Premium Features</Text>
+        
+        <View style={styles.premiumContainer}>
+          <View style={styles.premiumIconContainer}>
+            <Ionicons name="star" size={40} color={theme.colors.warning} />
+          </View>
+          <View style={styles.premiumTextContainer}>
+            <Text style={[styles.premiumTitle, { color: theme.colors.text }]}>
+              Unlock Premium Features
+            </Text>
+            <Text style={[styles.premiumDescription, { color: theme.colors.textSecondary }]}>
+              Get unlimited verses, advanced features, and an ad-free experience with a premium subscription.
+            </Text>
+          </View>
+        </View>
+        
+        <TouchableOpacity
+          style={[styles.premiumButton, { backgroundColor: theme.colors.warning }]}
+          onPress={() => navigation.navigate('Subscription')}
+        >
+          <Ionicons name="diamond-outline" size={20} color="white" />
+          <Text style={styles.premiumButtonText}>View Subscription Plans</Text>
+        </TouchableOpacity>
+      </View>
+      
       <TouchableOpacity 
         style={[
           styles.saveButton, 
@@ -344,7 +372,40 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-  }
+  },
+  // Premium feature styles
+  premiumContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  premiumIconContainer: {
+    marginRight: 16,
+  },
+  premiumTextContainer: {
+    flex: 1,
+  },
+  premiumTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  premiumDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  premiumButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  premiumButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
 });
 
 export default ProfileSetup;
