@@ -1,10 +1,9 @@
-// src/services/firebase/subscriptionService.tsx
 
 import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { db } from './firebaseConfig';
 import { functions, httpsCallable } from './firebaseFunctions';
-import { createPaymentMethod, createSubscription as stripeCreateSubscription } from '../payment/stripeService';
+import { createPaymentMethod, createSubscription as stripeCreateSubscription } from '../payment/revenueCatService';
 import { formatDate } from '../../utils/paymentUtils';
 
 export interface SubscriptionPlan {

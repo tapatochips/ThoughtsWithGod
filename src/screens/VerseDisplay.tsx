@@ -209,7 +209,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                     <>
                         <View style={[styles.verseCard, { 
                             backgroundColor: theme.colors.card,
-                            ...getShadowStyle(theme)
+                            ...getShadowStyle(theme),
                         }]}>
                             <RenderHtml 
                                 source={{ html: getTaggedVerseText() }} 
@@ -227,11 +227,11 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     li: { color: theme.colors.text },
                                     a: { color: theme.colors.primary }
                                 }}
-                                baseStyle={{ color: theme.colors.text }}
+                                baseStyle={{ color: theme.colors.text, fontSize: theme.fontSize.md }}
                             />
                             <Text style={[styles.verseReference, { 
                                 color: theme.colors.textSecondary,
-                                fontSize: theme.fontSize.sm,
+                                fontSize: theme.fontSize.md,
                                 borderTopColor: theme.colors.divider 
                             }]}>
                                 {currentVerse.book_name} {currentVerse.chapter}:{currentVerse.verse}
@@ -298,6 +298,21 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     </Text>
                                 </TouchableOpacity>
                             </View>
+
+                            {/* Add this new button for subscription */}
+                            <TouchableOpacity 
+                              style={[styles.profileNavButton, { 
+                                backgroundColor: theme.colors.surface,
+                                ...getShadowStyle(theme),
+                                marginBottom: 12  // Add some spacing
+                              }]} 
+                              onPress={() => navigation.navigate('Subscription')}
+                            >
+                              <Ionicons name="star-outline" size={22} color={theme.colors.primary} />
+                              <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                Premium Subscription
+                              </Text>
+                            </TouchableOpacity>
 
                             <TouchableOpacity 
                                 style={[styles.profileNavButton, { 
@@ -416,7 +431,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     sectionTitle: {
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: '500',
         marginBottom: 12,
         paddingLeft: 8,

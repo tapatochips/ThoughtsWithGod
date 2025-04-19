@@ -1,9 +1,11 @@
+// src/context/FirebaseContext.tsx
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
 import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
 import { Auth, User, onAuthStateChanged } from "firebase/auth";
-import { firebaseInstance } from '../services/firebase/firebaseConfig'; // Adjust path
+import { firebaseInstance } from '../services/firebase/firebaseConfig';
 import { UserProfile, createUserProfile, getUserProfile } from '../services/firebase/userProfile';
+import { initializeRevenueCat, identifyUser, resetUser } from '../services/payment/revenueCatService';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
@@ -14,6 +16,7 @@ interface FirebaseContextType {
     userProfile: UserProfile | null;
     refreshUserProfile: () => Promise<void>;
     isLoading: boolean;
+    isPremiumUser: boolean;
 }
 
 interface FirebaseProviderProps {
@@ -28,7 +31,8 @@ const FirebaseContext = createContext<FirebaseContextType>({
     user: null,
     userProfile: null,
     refreshUserProfile: async () => {},
-    isLoading: true
+    isLoading: true,
+    isPremiumUser: false
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
@@ -36,6 +40,16 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     const [user, setUser] = useState<User | null>(firebaseInstance.auth?.currentUser || null);
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isPremiumUser, setIsPremiumUser] = useState(false);
+
+    // Initialize RevenueCat when component mounts
+    useEffect(() => {
+        const initRevenueCat = async () => {
+            await initializeRevenueCat();
+        };
+        
+        initRevenueCat();
+    }, []);
 
     // Fetch user profile whenever user changes
     useEffect(() => {
@@ -45,11 +59,19 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
                     // Create profile if it doesn't exist, or get existing one
                     const profile = await createUserProfile(user);
                     setUserProfile(profile);
+                    
+                    // Identify user with RevenueCat
+                    const customerInfo = await identifyUser(user.uid);
+                    // Check if user has premium access
+                    setIsPremiumUser(!!customerInfo?.entitlements.active.premium);
                 } catch (error) {
                     console.error("Error fetching user profile:", error);
                 }
             } else {
                 setUserProfile(null);
+                setIsPremiumUser(false);
+                // Reset RevenueCat user if logged out
+                await resetUser();
             }
             setIsLoading(false);
         };
@@ -100,7 +122,8 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         user,
         userProfile,
         refreshUserProfile,
-        isLoading
+        isLoading,
+        isPremiumUser
     };
 
     return (
