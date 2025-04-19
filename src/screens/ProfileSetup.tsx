@@ -1,10 +1,10 @@
+// src/screens/ProfileSetup.tsx
 import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   TextInput, 
-  Button, 
   Alert,
   TouchableOpacity,
   ScrollView,
@@ -21,7 +21,7 @@ interface ProfileSetupProps {
 }
 
 const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
-  const { user, userProfile, refreshUserProfile } = useFirebase();
+  const { user, userProfile, refreshUserProfile, isPremiumUser } = useFirebase();
   const { theme, setThemePreference, setFontSizePreference } = useTheme();
   const [username, setUsername] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark' | 'sepia'>('light');
@@ -202,20 +202,22 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
         </View>
       </View>
       
-      {/* New Premium Features Section */}
+      {/* Premium Features Section with RevenueCat integration */}
       <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Premium Features</Text>
         
         <View style={styles.premiumContainer}>
           <View style={styles.premiumIconContainer}>
-            <Ionicons name="star" size={40} color={theme.colors.warning} />
+            <Ionicons name={isPremiumUser ? "star" : "star-outline"} size={40} color={theme.colors.warning} />
           </View>
           <View style={styles.premiumTextContainer}>
             <Text style={[styles.premiumTitle, { color: theme.colors.text }]}>
-              Unlock Premium Features
+              {isPremiumUser ? "Premium Features Unlocked" : "Unlock Premium Features"}
             </Text>
             <Text style={[styles.premiumDescription, { color: theme.colors.textSecondary }]}>
-              Get unlimited verses, advanced features, and an ad-free experience with a premium subscription.
+              {isPremiumUser 
+                ? "Thank you for your support! You have access to all premium features."
+                : "Get unlimited verses, advanced features, and an ad-free experience with a premium subscription."}
             </Text>
           </View>
         </View>
@@ -224,8 +226,10 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
           style={[styles.premiumButton, { backgroundColor: theme.colors.warning }]}
           onPress={() => navigation.navigate('Subscription')}
         >
-          <Ionicons name="diamond-outline" size={20} color="white" />
-          <Text style={styles.premiumButtonText}>View Subscription Plans</Text>
+          <Ionicons name={isPremiumUser ? "settings-outline" : "diamond-outline"} size={20} color="white" />
+          <Text style={styles.premiumButtonText}>
+            {isPremiumUser ? "Manage Subscription" : "View Subscription Plans"}
+          </Text>
         </TouchableOpacity>
       </View>
       
