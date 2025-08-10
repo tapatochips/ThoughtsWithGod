@@ -1,5 +1,5 @@
 import { getFunctions, httpsCallable, connectFunctionsEmulator, Functions } from 'firebase/functions';
-import { firebaseInstance } from './firebaseConfig';
+import { firebaseInstance } from './firebaseReactNative';
 
 // Initialize Firebase Functions
 let functions: Functions | null = null;

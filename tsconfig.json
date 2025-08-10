@@ -6,7 +6,7 @@
       "dom",
       "esnext"
     ],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noEmit": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
@@ -25,8 +25,12 @@
     "**/*.test.*"
   ],
   "include": [
-    "*.ts", "*.tsx", // Or wherever your .ts files are
-    "combinedBible.d.ts" // Include the declaration file
-, "src/services/firebase/firebaseReactNative.tsx", "App.tsx", "functions/src/index.tsx"  ],
+    "*.ts",
+    "*.tsx",
+    "combinedBible.d.ts",
+    "src/services/firebase/firebaseReactNative.tsx",
+    "App.tsx",
+    "functions/src/index.tsx"
+  ],
   "extends": "expo/tsconfig.base"
 }

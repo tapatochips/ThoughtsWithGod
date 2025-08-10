@@ -14,7 +14,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
 import { NavigationProp, ParamListBase, RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { formatDate, formatPrice } from '../utils/paymentUtils';
-import { functions } from '../services/firebase/firebaseFunctions';
+import { functions, httpsCallable } from '../services/firebase/firebaseFunctions';
 
 type RouteParams = {
   transactionId: string;

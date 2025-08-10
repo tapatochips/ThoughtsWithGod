@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import versesData from '../data/combinedBible.json';
 import RenderHtml from 'react-native-render-html';
-import { db } from "../services/firebase/firebaseConfig";
+import { db } from "../services/firebase/firebaseReactNative";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 interface Verse {
     id?: string;
     text: string;
-    bood_id: string;
+    book_id: string;
     book_name: string;
     chapter: number;
     info: string;
@@ -310,7 +310,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                             >
                               <Ionicons name="star-outline" size={22} color={theme.colors.primary} />
                               <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
-                                Premium Subscription
+                                Support us here!
                               </Text>
                             </TouchableOpacity>
 

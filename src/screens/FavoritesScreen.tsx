@@ -10,7 +10,7 @@ import {
   Platform, 
   ActivityIndicator
 } from 'react-native';
-import { db } from '../services/firebase/firebaseConfig';
+import { db } from '../services/firebase/firebaseReactNative';
 import { collection, onSnapshot, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import RenderHtml from 'react-native-render-html';
 import { useFirebase } from '../context/FirebaseContext';

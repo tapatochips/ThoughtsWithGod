@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User profiles - users can only read/write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Favorites collection - users can only access their own favorites
+      match /favorites/{favoriteId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // User profiles for settings and preferences
+    match /userProfiles/{userId} {
+      // Anyone can read basic profile info (username)
+      allow read: if request.auth != null;
+      
+      // Only the user can write to their own profile
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Prayer requests - anyone can read, but only authenticated users can create
+    // Users can only update or delete their own prayer requests
+    match /prayers/{prayerId} {
+      // Allow anyone authenticated to read prayers
+      allow read: if request.auth != null;
+      
+      // Allow creation if the user is setting their own ID as the creator
+      allow create: if request.auth != null && 
+                     request.resource.data.userId == request.auth.uid;
+      
+      // Owner can update or delete their own prayers
+      allow update, delete: if request.auth != null && 
+                             resource.data.userId == request.auth.uid;
+      
+      // Special case for liking prayers - any user can update if they're only modifying the likedBy array
+      allow update: if request.auth != null && 
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']);
+      
+      // Comments subcollection - anyone authenticated can read
+      match /comments/{commentId} {
+        allow read: if request.auth != null;
+        
+        // Allow creation if the user is setting their own ID as the commenter
+        allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid;
+        
+        // Only the comment creator can update or delete their comment
+        allow update, delete: if request.auth != null && 
+                               resource.data.userId == request.auth.uid;
+      }
+    }
+  }
+}

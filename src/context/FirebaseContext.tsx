@@ -3,9 +3,13 @@ import React, { createContext, useContext, ReactNode, useState, useEffect } from
 import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
 import { Auth, User, onAuthStateChanged } from "firebase/auth";
-import { firebaseInstance } from '../services/firebase/firebaseConfig';
-import { UserProfile, createUserProfile, getUserProfile } from '../services/firebase/userProfile';
-import { initializeRevenueCat, identifyUser, resetUser } from '../services/payment/revenueCatService';
+import { firebaseInstance } from '../services/firebase/firebaseReactNative';
+import {
+    UserProfile,
+    createUserProfile,
+    getUserProfile,
+    getPremiumDetails
+} from '../services/firebase/userProfile';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
@@ -16,7 +20,11 @@ interface FirebaseContextType {
     userProfile: UserProfile | null;
     refreshUserProfile: () => Promise<void>;
     isLoading: boolean;
+    // Premium status properties
     isPremiumUser: boolean;
+    premiumPlan: string | null;
+    premiumExpiry: Date | null;
+    refreshPremiumStatus: () => Promise<void>;
 }
 
 interface FirebaseProviderProps {
@@ -30,9 +38,12 @@ const FirebaseContext = createContext<FirebaseContextType>({
     firebaseInstance: firebaseInstance,
     user: null,
     userProfile: null,
-    refreshUserProfile: async () => {},
+    refreshUserProfile: async () => { },
     isLoading: true,
-    isPremiumUser: false
+    isPremiumUser: false,
+    premiumPlan: null,
+    premiumExpiry: null,
+    refreshPremiumStatus: async () => { }
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
@@ -40,16 +51,34 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     const [user, setUser] = useState<User | null>(firebaseInstance.auth?.currentUser || null);
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [isPremiumUser, setIsPremiumUser] = useState(false);
 
-    // Initialize RevenueCat when component mounts
-    useEffect(() => {
-        const initRevenueCat = async () => {
-            await initializeRevenueCat();
-        };
-        
-        initRevenueCat();
-    }, []);
+    // Premium status state
+    const [isPremiumUser, setIsPremiumUser] = useState(false);
+    const [premiumPlan, setPremiumPlan] = useState<string | null>(null);
+    const [premiumExpiry, setPremiumExpiry] = useState<Date | null>(null);
+
+    // Function to check premium status
+    const checkUserPremiumStatus = async (userId: string) => {
+        try {
+            // Get premium details from user profile or subscription
+            const premiumDetails = await getPremiumDetails(userId);
+
+            if (premiumDetails && premiumDetails.isPremium) {
+                setIsPremiumUser(true);
+                setPremiumPlan(premiumDetails.plan || null);
+                setPremiumExpiry(premiumDetails.expiryDate || null);
+            } else {
+                setIsPremiumUser(false);
+                setPremiumPlan(null);
+                setPremiumExpiry(null);
+            }
+        } catch (error) {
+            console.error("Error checking premium status:", error);
+            setIsPremiumUser(false);
+            setPremiumPlan(null);
+            setPremiumExpiry(null);
+        }
+    };
 
     // Fetch user profile whenever user changes
     useEffect(() => {
@@ -59,19 +88,17 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
                     // Create profile if it doesn't exist, or get existing one
                     const profile = await createUserProfile(user);
                     setUserProfile(profile);
-                    
-                    // Identify user with RevenueCat
-                    const customerInfo = await identifyUser(user.uid);
-                    // Check if user has premium access
-                    setIsPremiumUser(!!customerInfo?.entitlements.active.premium);
+
+                    // Check premium status
+                    await checkUserPremiumStatus(user.uid);
                 } catch (error) {
                     console.error("Error fetching user profile:", error);
                 }
             } else {
                 setUserProfile(null);
                 setIsPremiumUser(false);
-                // Reset RevenueCat user if logged out
-                await resetUser();
+                setPremiumPlan(null);
+                setPremiumExpiry(null);
             }
             setIsLoading(false);
         };
@@ -107,10 +134,20 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
                 const profile = await getUserProfile(user.uid);
                 if (profile) {
                     setUserProfile(profile);
+
+                    // Also refresh premium status
+                    await checkUserPremiumStatus(user.uid);
                 }
             } catch (error) {
                 console.error("Error refreshing user profile:", error);
             }
+        }
+    };
+
+    // Function to manually refresh premium status only
+    const refreshPremiumStatus = async () => {
+        if (user) {
+            await checkUserPremiumStatus(user.uid);
         }
     };
 
@@ -123,7 +160,10 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         userProfile,
         refreshUserProfile,
         isLoading,
-        isPremiumUser
+        isPremiumUser,
+        premiumPlan,
+        premiumExpiry,
+        refreshPremiumStatus
     };
 
     return (

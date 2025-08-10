@@ -1,6 +1,5 @@
-
-
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onRequest } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import Stripe from 'stripe';
@@ -11,16 +10,16 @@ if (admin.apps.length === 0) {
     admin.initializeApp();
 }
 
-// Initialize Stripe 
+// Initialize Stripe with proper configuration
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-    apiVersion: '2023-10-16', 
+    apiVersion: '2024-11-20.acacia' as Stripe.LatestApiVersion,
 });
 
 // Email configuration
-const emailTransport = nodemailer.createTransporter({
+const emailTransport = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: process.env.EMAIL_USER || 'thoughtswithgod@gmail.com',
+        user: process.env.EMAIL_USER || 'thoughtwithgod@gmail.com',
         pass: process.env.EMAIL_PASS || '', // Use app password
     },
 });
@@ -36,7 +35,7 @@ interface CreateSubscriptionData {
 export const createSubscription = onCall<CreateSubscriptionData>(
     {
         cors: true,
-        secrets: ['STRIPE_SECRET_KEY'], // This tells Firebase to inject the secret
+        secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
         if (!request.auth) {
@@ -47,11 +46,11 @@ export const createSubscription = onCall<CreateSubscriptionData>(
         const userId = request.auth.uid;
 
         try {
-            // Simple plan mapping
+            // Plan mapping 
             const planPrices: Record<string, { priceId: string; amount: number }> = {
-                'monthly_basic': { priceId: 'price_basic_monthly', amount: 499 },
-                'monthly_premium': { priceId: 'price_premium_monthly', amount: 999 },
-                'yearly_premium': { priceId: 'price_yearly_premium', amount: 9999 },
+                'monthly_basic': { priceId: 'price_XXXXXXXXXXXXX', amount: 499 },
+                'monthly_premium': { priceId: 'price_XXXXXXXXXXXXX', amount: 999 },
+                'yearly_premium': { priceId: 'price_XXXXXXXXXXXXX', amount: 9999 },
             };
 
             const plan = planPrices[planId];
@@ -114,13 +113,21 @@ export const createSubscription = onCall<CreateSubscriptionData>(
                 },
             });
 
+            // Update user profile premium status
+            await admin.firestore().collection('userProfiles').doc(userId).update({
+                isPremium: true,
+                premiumPlan: planId,
+                premiumExpiry: admin.firestore.Timestamp.fromDate(endDate),
+                premiumUpdatedAt: admin.firestore.Timestamp.now(),
+            });
+
             return {
                 subscriptionId: subscription.id,
                 stripeCustomerId: customerId,
             };
-        } catch (error) {
+        } catch (error: any) {
             console.error('Subscription creation failed:', error);
-            throw new HttpsError('internal', 'Subscription creation failed');
+            throw new HttpsError('internal', error.message || 'Subscription creation failed');
         }
     }
 );
@@ -154,7 +161,10 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
                 currency,
                 payment_method: paymentMethodId,
                 confirm: true,
-                automatic_payment_methods: { enabled: true },
+                automatic_payment_methods: {
+                    enabled: true,
+                    allow_redirects: 'never'
+                },
                 description,
                 metadata: {
                     ...metadata,
@@ -167,9 +177,54 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
                 clientSecret: paymentIntent.client_secret,
                 transactionId: paymentIntent.id,
             };
-        } catch (error) {
+        } catch (error: any) {
             console.error('Payment intent creation failed:', error);
-            throw new HttpsError('internal', 'Payment processing failed');
+            throw new HttpsError('internal', error.message || 'Payment processing failed');
+        }
+    }
+);
+
+// Create a payment method (for testing - in production use Stripe SDK on client)
+interface CreatePaymentMethodData {
+    card: {
+        number: string;
+        expMonth: number;
+        expYear: number;
+        cvc: string;
+    };
+}
+
+export const createPaymentMethod = onCall<CreatePaymentMethodData>(
+    {
+        cors: true,
+        secrets: ['STRIPE_SECRET_KEY'],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError('unauthenticated', 'Must be logged in');
+        }
+
+        const { card } = request.data;
+
+        try {
+            // WARNING: This is for testing only!
+            // In production, use Stripe Elements or React Native SDK on the client
+            const paymentMethod = await stripe.paymentMethods.create({
+                type: 'card',
+                card: {
+                    number: card.number,
+                    exp_month: card.expMonth,
+                    exp_year: card.expYear,
+                    cvc: card.cvc,
+                },
+            });
+
+            return {
+                paymentMethodId: paymentMethod.id,
+            };
+        } catch (error: any) {
+            console.error('Error creating payment method:', error);
+            throw new HttpsError('internal', error.message || 'Failed to create payment method');
         }
     }
 );
@@ -211,72 +266,150 @@ export const cancelSubscription = onCall(
             await admin.firestore().collection('subscriptions').doc(userId).update({
                 status: 'canceled',
                 autoRenew: false,
+                canceledAt: admin.firestore.Timestamp.now(),
             });
 
             return { success: true };
-        } catch (error) {
+        } catch (error: any) {
             console.error('Subscription cancellation failed:', error);
-            throw new HttpsError('internal', 'Subscription cancellation failed');
+            throw new HttpsError('internal', error.message || 'Subscription cancellation failed');
         }
     }
 );
 
-// =================== EMAIL FUNCTIONS ===================
-
-interface ReceiptEmailData {
-    email: string;
-    purchaseDetails: {
-        amount: number;
-        transactionId: string;
-        purchaseDate: string;
-        productName: string;
-        description: string;
-    };
+// Toggle auto-renewal
+interface ToggleAutoRenewData {
+    autoRenew: boolean;
 }
 
-export const sendReceiptEmail = onCall<ReceiptEmailData>(
+export const toggleAutoRenew = onCall<ToggleAutoRenewData>(
     {
-        secrets: ['EMAIL_USER', 'EMAIL_PASS'],
+        cors: true,
+        secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
         if (!request.auth) {
             throw new HttpsError('unauthenticated', 'Must be logged in');
         }
 
-        const { email, purchaseDetails } = request.data;
-        const { amount, transactionId, purchaseDate, productName, description } = purchaseDetails;
+        const { autoRenew } = request.data;
+        const userId = request.auth.uid;
 
         try {
-            const mailOptions = {
-                from: '"Thoughts With God" <thoughtswithgod@gmail.com>',
-                to: email,
-                subject: 'Your Thoughts With God Receipt',
-                html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h1 style="color: #5271FF; text-align: center;">Thoughts With God</h1>
-            <h2>Receipt for Your Purchase</h2>
-            
-            <div style="background-color: #f7f9fc; padding: 15px; border-radius: 5px; margin: 20px 0;">
-              <h3>Purchase Details</h3>
-              <p><strong>Item:</strong> ${productName}</p>
-              <p><strong>Description:</strong> ${description}</p>
-              <p><strong>Amount:</strong> $${(amount / 100).toFixed(2)}</p>
-              <p><strong>Transaction ID:</strong> ${transactionId}</p>
-              <p><strong>Date:</strong> ${new Date(purchaseDate).toLocaleDateString()}</p>
-            </div>
-            
-            <p style="text-align: center; color: #777; font-size: 12px;">
-              Thank you for your purchase! If you have any questions, please contact support@thoughtswithgod.com
-            </p>
-          </div>
-        `,
-            };
+            // Get subscription from Firestore
+            const subscriptionDoc = await admin.firestore().collection('subscriptions').doc(userId).get();
+            if (!subscriptionDoc.exists) {
+                throw new HttpsError('not-found', 'No active subscription found');
+            }
 
-            await emailTransport.sendMail(mailOptions);
+            const subscriptionData = subscriptionDoc.data();
+            const stripeSubscriptionId = subscriptionData?.stripeSubscriptionId;
+
+            if (!stripeSubscriptionId) {
+                throw new HttpsError('not-found', 'No Stripe subscription ID found');
+            }
+
+            // Update subscription in Stripe
+            await stripe.subscriptions.update(stripeSubscriptionId, {
+                cancel_at_period_end: !autoRenew,
+            });
+
+            // Update Firestore
+            await admin.firestore().collection('subscriptions').doc(userId).update({
+                autoRenew,
+            });
+
             return { success: true };
-        } catch (error) {
-            console.error('Error sending receipt email:', error);
-            throw new HttpsError('internal', 'Failed to send receipt email');
+        } catch (error: any) {
+            console.error('Error toggling auto-renew:', error);
+            throw new HttpsError('internal', error.message || 'Failed to update auto-renewal');
+        }
+    }
+);
+
+// =================== PAYMENT METHOD FUNCTIONS ===================
+
+// Get customer's payment methods
+export const getPaymentMethods = onCall(
+    {
+        cors: true,
+        secrets: ['STRIPE_SECRET_KEY'],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError('unauthenticated', 'Must be logged in');
+        }
+
+        const userId = request.auth.uid;
+
+        try {
+            // Get customer ID from Firestore
+            const userDoc = await admin.firestore().collection('users').doc(userId).get();
+            const customerId = userDoc.data()?.stripeCustomerId;
+
+            if (!customerId) {
+                return { paymentMethods: [] };
+            }
+
+            // Get payment methods from Stripe
+            const paymentMethods = await stripe.paymentMethods.list({
+                customer: customerId,
+                type: 'card',
+            });
+
+            return {
+                paymentMethods: paymentMethods.data.map(pm => ({
+                    id: pm.id,
+                    type: 'credit_card',
+                    last4: pm.card?.last4,
+                    brand: pm.card?.brand,
+                })),
+            };
+        } catch (error: any) {
+            console.error('Error fetching payment methods:', error);
+            throw new HttpsError('internal', error.message || 'Failed to fetch payment methods');
+        }
+    }
+);
+
+// Update default payment method
+interface UpdatePaymentMethodData {
+    paymentMethodId: string;
+}
+
+export const updateDefaultPaymentMethod = onCall<UpdatePaymentMethodData>(
+    {
+        cors: true,
+        secrets: ['STRIPE_SECRET_KEY'],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError('unauthenticated', 'Must be logged in');
+        }
+
+        const { paymentMethodId } = request.data;
+        const userId = request.auth.uid;
+
+        try {
+            // Get customer ID from Firestore
+            const userDoc = await admin.firestore().collection('users').doc(userId).get();
+            const customerId = userDoc.data()?.stripeCustomerId;
+
+            if (!customerId) {
+                throw new HttpsError('not-found', 'Customer not found');
+            }
+
+            // Update default payment method in Stripe
+            await stripe.customers.update(customerId, {
+                invoice_settings: {
+                    default_payment_method: paymentMethodId,
+                },
+            });
+
+            return { success: true };
+        } catch (error: any) {
+            console.error('Error updating payment method:', error);
+            throw new HttpsError('internal', error.message || 'Failed to update payment method');
         }
     }
 );
@@ -316,17 +449,228 @@ export const validateSubscription = onCall(
             // Check if subscription end date is in the future
             const now = admin.firestore.Timestamp.now();
             const endDate = subscriptionData.endDate;
-            const isNotExpired = endDate.toMillis() > now.toMillis();
+            const isNotExpired = endDate && endDate.toMillis() > now.toMillis();
 
             return {
                 active: isActive && isNotExpired,
                 plan: subscriptionData.planId,
-                endDate: endDate.toDate().toISOString(),
-                autoRenew: subscriptionData.autoRenew,
+                endDate: endDate?.toDate().toISOString(),
+                autoRenew: subscriptionData.autoRenew ?? true,
             };
-        } catch (error) {
+        } catch (error: any) {
             console.error('Subscription validation failed:', error);
             return { active: false };
+        }
+    }
+);
+
+// =================== EMAIL FUNCTIONS ===================
+
+interface ReceiptEmailData {
+    email: string;
+    purchaseDetails: {
+        amount: number;
+        transactionId: string;
+        purchaseDate: string;
+        productName: string;
+        description: string;
+    };
+}
+
+export const sendReceiptEmail = onCall<ReceiptEmailData>(
+    {
+        cors: true,
+        secrets: ['EMAIL_USER', 'EMAIL_PASS'],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError('unauthenticated', 'Must be logged in');
+        }
+
+        const { email, purchaseDetails } = request.data;
+        const { amount, transactionId, purchaseDate, productName, description } = purchaseDetails;
+
+        try {
+            const mailOptions = {
+                from: '"Thoughts With God" <thoughtswithgod@gmail.com>',
+                to: email,
+                subject: 'Your Thoughts With God Receipt',
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                        <h1 style="color: #5271FF; text-align: center;">Thoughts With God</h1>
+                        <h2>Receipt for Your Purchase</h2>
+                        
+                        <div style="background-color: #f7f9fc; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                            <h3>Purchase Details</h3>
+                            <p><strong>Item:</strong> ${productName}</p>
+                            <p><strong>Description:</strong> ${description}</p>
+                            <p><strong>Amount:</strong> $${(amount / 100).toFixed(2)}</p>
+                            <p><strong>Transaction ID:</strong> ${transactionId}</p>
+                            <p><strong>Date:</strong> ${new Date(purchaseDate).toLocaleDateString()}</p>
+                        </div>
+                        
+                        <p style="text-align: center; color: #777; font-size: 12px;">
+                            Thank you for your purchase! If you have any questions, please contact support@thoughtswithgod.com
+                        </p>
+                    </div>
+                `,
+            };
+
+            await emailTransport.sendMail(mailOptions);
+            return { success: true };
+        } catch (error: any) {
+            console.error('Error sending receipt email:', error);
+            throw new HttpsError('internal', error.message || 'Failed to send receipt email');
+        }
+    }
+);
+
+// =================== STRIPE WEBHOOK ===================
+
+export const stripeWebhook = onRequest(
+    {
+        cors: false,
+        secrets: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
+    },
+    async (request, response) => {
+        const sig = request.headers['stripe-signature'];
+        const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+        if (!sig || !endpointSecret) {
+            response.status(400).send('Missing signature or secret');
+            return;
+        }
+
+        let event: Stripe.Event;
+
+        try {
+            // Use request.rawBody if available, otherwise request.body
+            const payload = (request as any).rawBody || request.body;
+            event = stripe.webhooks.constructEvent(
+                payload,
+                sig,
+                endpointSecret
+            );
+        } catch (err: any) {
+            console.error('Webhook signature verification failed:', err.message);
+            response.status(400).send(`Webhook Error: ${err.message}`);
+            return;
+        }
+
+        // Handle the event
+        try {
+            switch (event.type) {
+                case 'customer.subscription.created':
+                case 'customer.subscription.updated': {
+                    const subscription = event.data.object as Stripe.Subscription;
+                    const userId = subscription.metadata.userId;
+
+                    if (userId) {
+                        await admin.firestore().collection('subscriptions').doc(userId).set({
+                            status: subscription.status,
+                            currentPeriodEnd: new Date((subscription.current_period_end as number)* 1000),
+                            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+                            planId: subscription.metadata.planId,
+                            stripeSubscriptionId: subscription.id,
+                            stripeCustomerId: subscription.customer as string,
+                            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        }, { merge: true });
+
+                        // Update user profile premium status
+                        await admin.firestore().collection('userProfiles').doc(userId).update({
+                            isPremium: subscription.status === 'active',
+                            premiumPlan: subscription.metadata.planId,
+                            premiumExpiry: admin.firestore.Timestamp.fromDate(new Date((subscription.current_period_end as number) * 1000)),
+                            premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        });
+                    }
+                    break;
+                }
+
+                case 'customer.subscription.deleted': {
+                    const subscription = event.data.object as Stripe.Subscription;
+                    const userId = subscription.metadata.userId;
+
+                    if (userId) {
+                        await admin.firestore().collection('subscriptions').doc(userId).update({
+                            status: 'canceled',
+                            canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+                        });
+
+                        // Update user profile premium status
+                        await admin.firestore().collection('userProfiles').doc(userId).update({
+                            isPremium: false,
+                            premiumPlan: null,
+                            premiumExpiry: null,
+                            premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        });
+                    }
+                    break;
+                }
+
+                case 'invoice.payment_succeeded': {
+                    const invoice = event.data.object as Stripe.Invoice;
+                    console.log('Payment succeeded for invoice:', invoice.id);
+
+                    // Send receipt email if configured
+                    if (invoice.customer_email && invoice.id) {
+                        const receiptData: ReceiptEmailData = {
+                            email: invoice.customer_email,
+                            purchaseDetails: {
+                                amount: invoice.amount_paid,
+                                transactionId: invoice.id,
+                                purchaseDate: new Date(invoice.created * 1000).toISOString(),
+                                productName: 'ThoughtsWithGod Subscription',
+                                description: invoice.description || 'Monthly subscription',
+                            }
+                        };
+
+                        // Call sendReceiptEmail function
+                        try {
+                            await sendReceiptEmail.run({
+                                data: receiptData,
+                                auth: { uid: 'system' }
+                            } as any);
+                        } catch (error) {
+                            console.error('Failed to send receipt email:', error);
+                        }
+                    }
+                    break;
+                }
+
+                case 'invoice.payment_failed': {
+                    const invoice = event.data.object as Stripe.Invoice;
+                    const customerId = invoice.customer as string;
+
+                    console.log('Payment failed for invoice:', invoice.id);
+
+                    // Find user by Stripe customer ID
+                    const usersSnapshot = await admin.firestore()
+                        .collection('users')
+                        .where('stripeCustomerId', '==', customerId)
+                        .limit(1)
+                        .get();
+
+                    if (!usersSnapshot.empty) {
+                        const userId = usersSnapshot.docs[0].id;
+
+                        // Update subscription status
+                        await admin.firestore().collection('subscriptions').doc(userId).update({
+                            paymentStatus: 'failed',
+                            lastPaymentFailure: admin.firestore.FieldValue.serverTimestamp(),
+                        });
+                    }
+                    break;
+                }
+
+                default:
+                    console.log(`Unhandled event type ${event.type}`);
+            }
+
+            response.json({ received: true });
+        } catch (error) {
+            console.error('Error processing webhook:', error);
+            response.status(500).send('Webhook processing failed');
         }
     }
 );
@@ -343,18 +687,27 @@ export const createUserProfile = onDocumentCreated(
         if (!userData) return;
 
         try {
-            await admin.firestore().collection('userProfiles').doc(userId).set({
-                userId,
-                email: userData.email || '',
-                username: userData.email?.split('@')[0] || `user_${userId.substring(0, 5)}`,
-                createdAt: admin.firestore.Timestamp.now(),
-                preferences: {
-                    theme: 'light',
-                    fontSize: 'medium',
-                },
-            });
+            const existingProfile = await admin.firestore()
+                .collection('userProfiles')
+                .doc(userId)
+                .get();
 
-            console.log(`User profile created for ${userId}`);
+            if (!existingProfile.exists) {
+                await admin.firestore().collection('userProfiles').doc(userId).set({
+                    userId,
+                    email: userData.email || '',
+                    username: userData.email?.split('@')[0] || `user_${userId.substring(0, 5)}`,
+                    createdAt: admin.firestore.Timestamp.now(),
+                    isPremium: false,
+                    preferences: {
+                        theme: 'light',
+                        fontSize: 'medium',
+                        reminders: false,
+                    },
+                });
+
+                console.log(`User profile created for ${userId}`);
+            }
         } catch (error) {
             console.error('Failed to create user profile:', error);
         }

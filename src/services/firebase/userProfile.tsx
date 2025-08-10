@@ -1,7 +1,7 @@
 
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
-import { db } from './firebaseConfig'; // Adjust import path as needed
+import { db } from './firebaseReactNative';
 
 export interface UserProfile {
   userId: string;
@@ -171,8 +171,8 @@ export async function updateUserPremiumStatus(
     updateData.premiumExpiry = Timestamp.fromDate(thirtyDaysFromNow);
   } else {
     // If removing premium, clear expiry
-    updateData.premiumExpiry = null;
-    updateData.premiumPlan = null;
+    updateData.premiumExpiry = undefined;
+    updateData.premiumPlan = undefined;
   }
 
   if (transactionId) {

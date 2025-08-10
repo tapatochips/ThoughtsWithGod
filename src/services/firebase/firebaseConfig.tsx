@@ -2,7 +2,7 @@ import React, { createContext, useContext, ReactNode, useState, useEffect } from
 import { FirebaseApp } from "firebase/app";
 import { Firestore } from "firebase/firestore";
 import { Auth, User, onAuthStateChanged } from "firebase/auth";
-import { firebaseInstance } from './firebaseReactNative'; // Adjust path
+import { firebaseInstance } from './firebaseReactNative';
 import {
   UserProfile,
   createUserProfile,
