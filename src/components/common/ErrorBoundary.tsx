@@ -2,21 +2,24 @@ import React, { Component } from 'react';
 import { Text } from 'react-native';
 
 interface ErrorBoundaryProps {
-// Suggested code may be subject to a license. Learn more: ~LicenseLog:4026033020.
     children: React.ReactNode;
 }
 
-export class ErrorBoundary extends Component {
-    constructor(props) {
+interface ErrorBoundaryState {
+    hasError: boolean;
+}
+
+export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+    constructor(props: ErrorBoundaryProps) {
         super(props);
         this.state = { hasError: false };
     }
 
-    static getDerivedStateFromError(error) {
+    static getDerivedStateFromError(error: Error): ErrorBoundaryState {
         return { hasError: true };
     }
 
-    componentDidCatch(error, errorInfo) {
+    componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
         console.error('Error caught by ErrorBoundary:', error, errorInfo);
     }
 

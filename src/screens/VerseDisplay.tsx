@@ -16,6 +16,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import LogoutButton from '../components/auth/LogoutButton';
+import FontSizeControl from '../components/common/FontSizeControl';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Verse {
@@ -150,11 +151,11 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
         }
     };
 
-    // Create tagged HTML for the verse text using theme font size
+    // Create tagged HTML for the verse text using dynamic font size
     const getTaggedVerseText = () => {
         if (!currentVerse) return '';
         
-        const fontSize = theme.fontSize.md;
+        const fontSize = getFontSize();
         
         // Replace all text-containing elements to ensure proper theme colors
         return currentVerse.text
@@ -227,11 +228,11 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     li: { color: theme.colors.text },
                                     a: { color: theme.colors.primary }
                                 }}
-                                baseStyle={{ color: theme.colors.text, fontSize: theme.fontSize.md }}
+                                baseStyle={{ color: theme.colors.text, fontSize: getFontSize() }}
                             />
                             <Text style={[styles.verseReference, { 
                                 color: theme.colors.textSecondary,
-                                fontSize: theme.fontSize.md,
+                                fontSize: getFontSize(),
                                 borderTopColor: theme.colors.divider 
                             }]}>
                                 {currentVerse.book_name} {currentVerse.chapter}:{currentVerse.verse}
@@ -264,6 +265,14 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     </Text>
                                 </TouchableOpacity>
                             )}
+                        </View>
+                        
+                        {/* Font Size Quick Control */}
+                        <View style={[styles.fontSizeSection, { 
+                            backgroundColor: theme.colors.card,
+                            ...getShadowStyle(theme)
+                        }]}>
+                            <FontSizeControl />
                         </View>
                         
                         <View style={styles.navButtonsSection}>
@@ -462,6 +471,11 @@ const styles = StyleSheet.create({
     navButtonText: {
         marginLeft: 12,
         fontWeight: '500',
+    },
+    fontSizeSection: {
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 20,
     },
 });
 

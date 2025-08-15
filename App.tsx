@@ -33,8 +33,8 @@ const AppContent = () => {
   const { theme } = useTheme();
   const [error, setError] = useState<string | null>(null);
   const appState = useRef(AppState.currentState);
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>(null);
+  const responseListener = useRef<any>(null);
 
   // setup notification listeners
   useEffect(() => {
@@ -136,19 +136,19 @@ const navigationTheme = {
     fonts: {
       regular: {
         fontFamily: 'System',
-        fontWeight: 'normal', // Must be one of the allowed string literals
+        fontWeight: 'normal' as const, // Must be one of the allowed string literals
       },
       medium: {
         fontFamily: 'System',
-        fontWeight: '500', // Must be one of the allowed string literals
+        fontWeight: '500' as const, // Must be one of the allowed string literals
       },
       bold: {
         fontFamily: 'System',
-        fontWeight: 'bold', // Must be one of the allowed string literals
+        fontWeight: 'bold' as const, // Must be one of the allowed string literals
       },
       heavy: {
         fontFamily: 'System',
-        fontWeight: '900', // Must be one of the allowed string literals
+        fontWeight: '900' as const, // Must be one of the allowed string literals
       },
     },
   };

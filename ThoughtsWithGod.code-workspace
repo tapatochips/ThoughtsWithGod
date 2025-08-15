@@ -10,6 +10,10 @@
 		}
 	],
 	"settings": {
-		"eslint.nodePath": ""
+		"eslint.nodePath": "",
+		"editor.fontSize": 16,
+		"terminal.integrated.cursorBlinking": true,
+		"terminal.integrated.fontLigatures.enabled": true,
+		"terminal.integrated.suggest.enabled": true
 	}
 }

@@ -1,8 +1,6 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { initializeAuth, Auth } from 'firebase/auth';
-import { getReactNativePersistence } from 'firebase/auth';
+import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 console.log("firebaseReactNative.tsx: Start");
 
@@ -34,13 +32,11 @@ try {
   console.error("Error initializing Firebase app:", error);
 }
 
-// Initialize Auth with React Native persistence
+// Initialize Auth
 if (firebaseInstance.app) {
   console.log("firebaseInstance.app is initialized");
   try {
-    firebaseInstance.auth = initializeAuth(firebaseInstance.app, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
+    firebaseInstance.auth = getAuth(firebaseInstance.app);
     console.log("Auth initialized:", firebaseInstance.auth);
   } catch (error) {
     console.error("Error initializing auth:", error);

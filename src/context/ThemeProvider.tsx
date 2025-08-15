@@ -124,27 +124,27 @@ const baseThemes = {
 const fontSizes = {
   small: {
     xs: 10,
-    sm: 16,
-    md: 18,
-    lg: 22,
-    xl: 28,
-    xxl: 32
+    sm: 14,
+    md: 16,
+    lg: 18,
+    xl: 20,
+    xxl: 24
   },
   medium: {
-    xs: 10,
+    xs: 12,
     sm: 16,
     md: 18,
     lg: 22,
-    xl: 28,
-    xxl: 32
+    xl: 26,
+    xxl: 30
   },
   large: {
-    xs: 10,
-    sm: 16,
-    md: 18,
-    lg: 22,
-    xl: 28,
-    xxl: 32
+    xs: 14,
+    sm: 18,
+    md: 22,
+    lg: 26,
+    xl: 30,
+    xxl: 36
   }
 };
 
