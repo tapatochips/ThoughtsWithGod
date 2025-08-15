@@ -213,9 +213,6 @@ npm run web
 - Ensure proper TypeScript typing
 - Include accessibility labels for all interactive elements
 
-## 📄 License
-
-This project is licensed under the BSD Zero Clause License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
@@ -223,6 +220,8 @@ This project is licensed under the BSD Zero Clause License - see the [LICENSE](L
 - Icons by [Expo Vector Icons](https://docs.expo.dev/guides/icons/)
 - Firebase for backend infrastructure
 - RevenueCat for subscription management
+
+- Coded by Daniel Richmond
 
 ## 📞 Support
 
