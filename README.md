@@ -213,12 +213,15 @@ npm run web
 - Ensure proper TypeScript typing
 - Include accessibility labels for all interactive elements
 
+
 ## 🙏 Acknowledgments
 
 - Bible text provided by [Bible JSON source]
 - Icons by [Expo Vector Icons](https://docs.expo.dev/guides/icons/)
 - Firebase for backend infrastructure
 - RevenueCat for subscription management
+
+- Coded by Daniel Richmond
 
 ## 📞 Support
 
