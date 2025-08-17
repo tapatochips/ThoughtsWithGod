@@ -202,7 +202,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
         </View>
       </View>
       
-      {/* Premium Features Section with RevenueCat integration */}
+      {/* Premium Features Section with Stripe integration */}
       <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Premium Features</Text>
         

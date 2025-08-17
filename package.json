@@ -21,7 +21,6 @@
     "firebase": "^11.6.0",
     "react": "19.0.0",
     "react-native": "0.79.5",
-    "react-native-purchases": "8.9.5",
     "react-native-render-html": "^6.3.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1"

@@ -3,7 +3,7 @@ import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, Time
 import { User } from 'firebase/auth';
 import { db } from './firebaseConfig';
 import { functions, httpsCallable } from './firebaseFunctions';
-import { createPaymentMethod, createSubscription as stripeCreateSubscription } from '../payment/revenueCatService';
+import { createPaymentMethod, createSubscription as stripeCreateSubscription } from '../payment/stripeService';
 import { formatDate } from '../../utils/paymentUtils';
 
 export interface SubscriptionPlan {
