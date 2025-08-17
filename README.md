@@ -9,7 +9,7 @@ A beautiful React Native app that provides daily Bible verses, prayer management
 - **Favorites Management**: Save and organize your favorite verses
 - **Prayer Board**: Community prayer requests and personal prayer tracking
 - **User Profiles**: Personalized spiritual journey tracking
-- **Premium Subscriptions**: Enhanced features through RevenueCat integration
+- **Premium Subscriptions**: Can support the app by subscribing through Stripe
 
 ### Accessibility Features
 - **Dynamic Font Sizing**: Three font size options (Small, Medium, Large) with real-time updates
@@ -129,10 +129,10 @@ ThoughtsWithGod/
 3. Add your configuration to the environment variables
 4. Deploy security rules from `functions/firestore.rules`
 
-### RevenueCat Setup (for Premium Features)
-1. Create account at [RevenueCat](https://www.revenuecat.com)
+### Stripe Setup (for Premium Features)
+1. Create account at [Stripe](https://www.Stripe.com)
 2. Configure subscription products
-3. Add RevenueCat API keys to environment variables
+3. Add Stripe API keys to environment variables
 
 ## 📱 Key Components
 
@@ -212,10 +212,6 @@ npm run web
 - Test on multiple devices and screen sizes
 - Ensure proper TypeScript typing
 - Include accessibility labels for all interactive elements
-
-## 📄 License
-
-This project is licensed under the BSD Zero Clause License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 

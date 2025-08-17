@@ -16,7 +16,6 @@ import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import LogoutButton from '../components/auth/LogoutButton';
-import FontSizeControl from '../components/common/FontSizeControl';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Verse {
@@ -267,13 +266,6 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                             )}
                         </View>
                         
-                        {/* Font Size Quick Control */}
-                        <View style={[styles.fontSizeSection, { 
-                            backgroundColor: theme.colors.card,
-                            ...getShadowStyle(theme)
-                        }]}>
-                            <FontSizeControl />
-                        </View>
                         
                         <View style={styles.navButtonsSection}>
                             <Text style={[styles.sectionTitle, {color: theme.colors.textSecondary}]}>
@@ -471,11 +463,6 @@ const styles = StyleSheet.create({
     navButtonText: {
         marginLeft: 12,
         fontWeight: '500',
-    },
-    fontSizeSection: {
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 20,
     },
 });
 
