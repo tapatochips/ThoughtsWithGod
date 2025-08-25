@@ -8,6 +8,7 @@ import VerseDisplay from './src/screens/VerseDisplay';
 import AuthScreen from './src/screens/AuthScreen';
 import FavoritesScreen from './src/screens/FavoritesScreen';
 import PrayerBoard from './src/screens/PrayerBoard';
+import BiblicalDiscussions from './src/screens/BiblicalDiscussions';
 import ProfileSetup from './src/screens/ProfileSetup';
 import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import ReceiptViewer from './src/screens/ReceiptViewer';
@@ -182,6 +183,11 @@ const navigationTheme = {
               name="PrayerBoard" 
               component={PrayerBoard} 
               options={{ title: "Prayer Board" }}
+            />
+            <Stack.Screen 
+              name="BiblicalDiscussions" 
+              component={BiblicalDiscussions} 
+              options={{ title: "Biblical Discussions" }}
             />
             <Stack.Screen 
               name="ProfileSetup" 

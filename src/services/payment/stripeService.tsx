@@ -26,14 +26,11 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     {
         id: 'monthly_basic',
         name: 'Monthly Basic',
-        description: 'Access to all premium features for 1 month',
+        description: 'Want to support us?',
         price: 4.99,
         priceId: 'price_basic_monthly', // Update with your actual Stripe Price ID
         features: [
-            'Ad-free experience',
-            'Unlimited favorite verses',
-            'Personalized daily verses',
-            'Prayer board access'
+            'This plan helps keep the app running!'
         ],
         durationMonths: 1
     },
@@ -44,7 +41,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
         price: 9.99,
         priceId: 'price_premium_monthly', // Update with your actual Stripe Price ID
         features: [
-            'All Basic features',
             'Want to support us more? Choose this plan!',
         ],
         durationMonths: 1
@@ -56,9 +52,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
         price: 80.00,
         priceId: 'price_yearly_premium', // Update with your actual Stripe Price ID
         features: [
-            'All Basic features',
-            'Four months free (compared to monthly premium)',
-            'Early access to new features'
+            'Want to support us even more? Choose this plan!',
         ],
         durationMonths: 12
     }

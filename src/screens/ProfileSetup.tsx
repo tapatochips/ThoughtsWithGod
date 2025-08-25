@@ -204,7 +204,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
       
       {/* Premium Features Section with Stripe integration */}
       <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
-        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Premium Features</Text>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Want to support us?</Text>
         
         <View style={styles.premiumContainer}>
           <View style={styles.premiumIconContainer}>
@@ -212,12 +212,12 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
           </View>
           <View style={styles.premiumTextContainer}>
             <Text style={[styles.premiumTitle, { color: theme.colors.text }]}>
-              {isPremiumUser ? "Premium Features Unlocked" : "Unlock Premium Features"}
+              {isPremiumUser ? "Premium Features Unlocked" : "Support Us here!"}
             </Text>
             <Text style={[styles.premiumDescription, { color: theme.colors.textSecondary }]}>
               {isPremiumUser 
-                ? "Thank you for your support! You have access to all premium features."
-                : "Get unlimited verses, advanced features, and an ad-free experience with a premium subscription."}
+                ? "Thank you for your support! "
+                : "Help us keep the app running! Your support allows us to maintain and improve the app with new features and content."}
             </Text>
           </View>
         </View>

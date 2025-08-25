@@ -51,5 +51,37 @@ service cloud.firestore {
                                resource.data.userId == request.auth.uid;
       }
     }
+    
+    // Biblical discussions - anyone can read, but only authenticated users can create
+    // Users can only update or delete their own discussions
+    match /biblical-discussions/{discussionId} {
+      // Allow anyone authenticated to read discussions
+      allow read: if request.auth != null;
+      
+      // Allow creation if the user is setting their own ID as the creator
+      allow create: if request.auth != null && 
+                     request.resource.data.userId == request.auth.uid;
+      
+      // Owner can update or delete their own discussions
+      allow update, delete: if request.auth != null && 
+                             resource.data.userId == request.auth.uid;
+      
+      // Special case for liking discussions - any user can update if they're only modifying the likedBy array
+      allow update: if request.auth != null && 
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']);
+      
+      // Comments subcollection - anyone authenticated can read
+      match /comments/{commentId} {
+        allow read: if request.auth != null;
+        
+        // Allow creation if the user is setting their own ID as the commenter
+        allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid;
+        
+        // Only the comment creator can update or delete their comment
+        allow update, delete: if request.auth != null && 
+                               resource.data.userId == request.auth.uid;
+      }
+    }
   }
 }

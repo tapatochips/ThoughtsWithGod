@@ -300,6 +300,21 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                 </TouchableOpacity>
                             </View>
 
+                            {/* Biblical Discussions Button */}
+                            <TouchableOpacity 
+                                style={[styles.profileNavButton, { 
+                                    backgroundColor: theme.colors.surface,
+                                    ...getShadowStyle(theme),
+                                    marginBottom: 12
+                                }]} 
+                                onPress={() => navigation.navigate('BiblicalDiscussions')}
+                            >
+                                <Ionicons name="book-outline" size={22} color={theme.colors.primary} />
+                                <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                    Biblical Discussions
+                                </Text>
+                            </TouchableOpacity>
+
                             {/* Add this new button for subscription */}
                             <TouchableOpacity 
                               style={[styles.profileNavButton, { 
