@@ -10,8 +10,10 @@ import {
   Modal,
   Platform,
   ActivityIndicator,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
+  StatusBar
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
 import { 
@@ -29,6 +31,7 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 
 interface Comment {
   id: string;
@@ -475,22 +478,28 @@ const BiblicalDiscussions: React.FC = () => {
           visible={modalVisible}
           onRequestClose={() => setModalVisible(false)}
         >
-          <KeyboardAvoidingView 
-            style={{ flex: 1 }} 
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-          >
-            <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
-              <View style={[styles.modalHeader, { 
-                backgroundColor: theme.colors.card,
-                borderBottomColor: theme.colors.divider,
-                ...getShadowStyle(theme)
-              }]}>
-                <TouchableOpacity onPress={() => setModalVisible(false)}>
-                  <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
-                </TouchableOpacity>
-                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
-                <View style={{ width: 24 }} />
-              </View>
+          <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+            <StatusBar 
+              backgroundColor={theme.colors.card} 
+              barStyle={theme.name === 'dark' ? 'light-content' : 'dark-content'}
+            />
+            <View style={[styles.modalHeader, { 
+              backgroundColor: theme.colors.card,
+              borderBottomColor: theme.colors.divider,
+              paddingTop: Platform.OS === 'ios' ? 50 : Constants.statusBarHeight + 5,
+              ...getShadowStyle(theme)
+            }]}>
+              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.backButton}>
+                <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
+              <View style={{ width: 24 }} />
+            </View>
+            
+            <KeyboardAvoidingView 
+              style={{ flex: 1 }} 
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+            >
               
               {selectedDiscussion && (
                 <View style={[
@@ -631,8 +640,8 @@ const BiblicalDiscussions: React.FC = () => {
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
-          </KeyboardAvoidingView>
+            </KeyboardAvoidingView>
+          </View>
         </Modal>
       </View>
     </KeyboardAvoidingView>
@@ -821,6 +830,13 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  backButton: {
+    padding: 4,
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   originalDiscussion: {
     margin: 16,
