@@ -12,6 +12,7 @@ import BiblicalDiscussions from './src/screens/BiblicalDiscussions';
 import ProfileSetup from './src/screens/ProfileSetup';
 import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import ReceiptViewer from './src/screens/ReceiptViewer';
+import BibleReader from './src/screens/BibleReader';
 
 // providers
 import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
@@ -173,6 +174,11 @@ const navigationTheme = {
               name="VerseDisplay" 
               component={VerseDisplay} 
               options={{ title: "Daily Verse" }}
+            />
+            <Stack.Screen 
+              name="BibleReader" 
+              component={BibleReader} 
+              options={{ title: "Bible Reader" }}
             />
             <Stack.Screen 
               name="Favorites" 

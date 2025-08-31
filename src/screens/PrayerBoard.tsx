@@ -52,6 +52,7 @@ interface PrayerRequest {
   answered: boolean;
   likedBy: string[];
   commentCount: number;
+  isAnonymous?: boolean;
 }
 
 const PrayerBoard: React.FC = () => {
@@ -65,6 +66,7 @@ const PrayerBoard: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedPrayer, setSelectedPrayer] = useState<PrayerRequest | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [isAnonymous, setIsAnonymous] = useState(false);
 
   useEffect(() => {
     if (!db || !user) {
@@ -145,10 +147,12 @@ const PrayerBoard: React.FC = () => {
         createdAt: Timestamp.now(),
         answered: false,
         likedBy: [],
-        commentCount: 0
+        commentCount: 0,
+        isAnonymous: isAnonymous
       });
       
       setNewPrayer('');
+      setIsAnonymous(false);
     } catch (error) {
       console.error("Error adding prayer request:", error);
       Alert.alert("Error", "Failed to add prayer request. Please try again.");
@@ -364,6 +368,23 @@ const PrayerBoard: React.FC = () => {
             placeholderTextColor={theme.colors.secondary}
             multiline
           />
+          
+          <View style={styles.anonymousToggleContainer}>
+            <TouchableOpacity
+              style={[styles.anonymousToggle, {
+                backgroundColor: isAnonymous ? theme.colors.primary : 'transparent',
+                borderColor: theme.colors.primary
+              }]}
+              onPress={() => setIsAnonymous(!isAnonymous)}
+            >
+              {isAnonymous && (
+                <Ionicons name="checkmark" size={16} color="white" />
+              )}
+            </TouchableOpacity>
+            <Text style={[styles.anonymousLabel, { color: theme.colors.text }]}>
+              Post anonymously
+            </Text>
+          </View>
           <TouchableOpacity 
             style={[
               styles.addButton, 
@@ -403,12 +424,12 @@ const PrayerBoard: React.FC = () => {
                 <View style={styles.userInfo}>
                   <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
                     <Text style={styles.avatarText}>
-                      {(item.username || item.userEmail)[0].toUpperCase()}
+                      {item.isAnonymous ? '?' : (item.username || item.userEmail)[0].toUpperCase()}
                     </Text>
                   </View>
                   <View>
                     <Text style={[styles.username, { color: theme.colors.text }]}>
-                      {item.username || item.userEmail?.split('@')[0]}
+                      {item.isAnonymous ? 'Anonymous' : (item.username || item.userEmail?.split('@')[0])}
                     </Text>
                     <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
                       {formatDate(item.createdAt)}
@@ -554,12 +575,12 @@ const PrayerBoard: React.FC = () => {
                     <View style={styles.userInfo}>
                       <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
                         <Text style={styles.avatarText}>
-                          {(selectedPrayer.username || selectedPrayer.userEmail)[0].toUpperCase()}
+                          {selectedPrayer.isAnonymous ? '?' : (selectedPrayer.username || selectedPrayer.userEmail)[0].toUpperCase()}
                         </Text>
                       </View>
                       <View>
                         <Text style={[styles.username, { color: theme.colors.text }]}>
-                          {selectedPrayer.username || selectedPrayer.userEmail?.split('@')[0]}
+                          {selectedPrayer.isAnonymous ? 'Anonymous' : (selectedPrayer.username || selectedPrayer.userEmail?.split('@')[0])}
                         </Text>
                         <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
                           {formatDate(selectedPrayer.createdAt)}
@@ -991,6 +1012,24 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  anonymousToggleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  anonymousToggle: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  anonymousLabel: {
+    fontSize: 14,
   },
 });
 

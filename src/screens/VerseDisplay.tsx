@@ -280,7 +280,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     }]} 
                                     onPress={() => navigation.navigate('Favorites')}
                                 >
-                                    <Ionicons name="bookmark-outline" size={24} color={theme.colors.primary} />
+                                    <Ionicons name="bookmark-outline" size={20} color={theme.colors.primary} />
                                     <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
                                         My Favorites
                                     </Text>
@@ -293,9 +293,22 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     }]} 
                                     onPress={() => navigation.navigate('PrayerBoard')}
                                 >
-                                    <Ionicons name="people-outline" size={24} color={theme.colors.primary} />
+                                    <Ionicons name="people-outline" size={20} color={theme.colors.primary} />
                                     <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
                                         Prayer Board
+                                    </Text>
+                                </TouchableOpacity>
+                                
+                                <TouchableOpacity 
+                                    style={[styles.navButton, { 
+                                        backgroundColor: theme.colors.surface,
+                                        ...getShadowStyle(theme)
+                                    }]} 
+                                    onPress={() => navigation.navigate('BibleReader')}
+                                >
+                                    <Ionicons name="library-outline" size={20} color={theme.colors.primary} />
+                                    <Text style={[styles.navButtonText, { color: theme.colors.text }]}>
+                                        Read the Bible
                                     </Text>
                                 </TouchableOpacity>
                             </View>
@@ -457,6 +470,7 @@ const styles = StyleSheet.create({
     },
     navButtonContainer: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         justifyContent: 'space-between',
         width: '100%',
         marginBottom: 16,
@@ -464,9 +478,10 @@ const styles = StyleSheet.create({
     navButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
+        padding: 12,
         borderRadius: 12,
         width: '48%',
+        marginBottom: 8,
     },
     profileNavButton: {
         flexDirection: 'row',

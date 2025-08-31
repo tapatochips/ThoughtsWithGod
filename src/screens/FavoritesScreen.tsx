@@ -229,6 +229,23 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
                                     <TouchableOpacity 
                                         style={[
                                             styles.actionButton, 
+                                            { backgroundColor: `${theme.colors.success}15` }
+                                        ]} 
+                                        onPress={() => navigation.navigate('BibleReader', { 
+                                            book: verse.book_name, 
+                                            chapter: verse.chapter,
+                                            verse: verse.verse 
+                                        })}
+                                    >
+                                        <Ionicons name="library-outline" size={18} color={theme.colors.success} />
+                                        <Text style={[styles.actionButtonText, { color: theme.colors.success }]}>
+                                            Read Chapter
+                                        </Text>
+                                    </TouchableOpacity>
+                                    
+                                    <TouchableOpacity 
+                                        style={[
+                                            styles.actionButton, 
                                             { backgroundColor: theme.colors.surface }
                                         ]} 
                                         onPress={() => handleEditNote(verse)}
@@ -267,6 +284,13 @@ const FavoritesScreen: React.FC<FavoritesScreenProps> = ({ navigation }) => {
                     </Text>
                     <TouchableOpacity 
                         style={[styles.backButton, { backgroundColor: theme.colors.primary }]}
+                        onPress={() => navigation.navigate('BibleReader')}
+                    >
+                        <Text style={styles.backButtonText}>Read Bible</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity 
+                        style={[styles.backButton, { backgroundColor: theme.colors.secondary, marginTop: 12 }]}
                         onPress={() => navigation.navigate('VerseDisplay')}
                     >
                         <Text style={styles.backButtonText}>Go to Verses</Text>
