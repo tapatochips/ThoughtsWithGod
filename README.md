@@ -94,7 +94,7 @@ ThoughtsWithGod/
 │   ├── services/           # External service integrations
 │   │   ├── firebase/       # Firebase configuration
 │   │   ├── notifications.tsx
-│   │   └── payment/        # Stripe/RevenueCat integration
+│   │   └── payment/        # Stripe integration
 │   └── data/              # Static data and JSON files
 ├── BibleJSON/             # Complete Bible database
 ├── functions/             # Firebase Cloud Functions
@@ -219,7 +219,7 @@ npm run web
 - Bible text provided by [Bible JSON source]
 - Icons by [Expo Vector Icons](https://docs.expo.dev/guides/icons/)
 - Firebase for backend infrastructure
-- RevenueCat for subscription management
+- Stripe for subscription management
 
 - Coded by Daniel Richmond
 
