@@ -13,6 +13,7 @@ import ProfileSetup from './src/screens/ProfileSetup';
 import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import ReceiptViewer from './src/screens/ReceiptViewer';
 import BibleReader from './src/screens/BibleReader';
+import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
 
 // providers
 import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
@@ -205,18 +206,30 @@ const navigationTheme = {
               component={SubscriptionScreen} 
               options={{ title: "Premium Subscription" }}
             />
-            <Stack.Screen 
-              name="ReceiptViewer" 
-              component={ReceiptViewer} 
+            <Stack.Screen
+              name="ReceiptViewer"
+              component={ReceiptViewer}
               options={{ title: "Receipt" }}
+            />
+            <Stack.Screen
+              name="TermsOfService"
+              component={TermsOfServiceScreen}
+              options={{ title: "Terms of Service" }}
             />
           </>
         ) : (
-          <Stack.Screen 
-            name="Auth" 
-            component={AuthScreen}
-            options={{ title: "Sign In" }}
-          />
+          <>
+            <Stack.Screen
+              name="Auth"
+              component={AuthScreen}
+              options={{ title: "Sign In" }}
+            />
+            <Stack.Screen
+              name="TermsOfService"
+              component={TermsOfServiceScreen}
+              options={{ title: "Terms of Service" }}
+            />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

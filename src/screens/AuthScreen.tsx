@@ -4,8 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { auth } from "../services/firebase/firebaseReactNative";
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { useTheme } from "../context/ThemeProvider";
+import { NavigationProp, ParamListBase } from '@react-navigation/native';
 
-const AuthScreen = () => {
+interface AuthScreenProps {
+    navigation: NavigationProp<ParamListBase>;
+}
+
+const AuthScreen: React.FC<AuthScreenProps> = ({ navigation }) => {
     const { theme } = useTheme();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -174,7 +179,7 @@ const AuthScreen = () => {
                     <TouchableOpacity
                         style={[
                             styles.secondaryButton,
-                            { 
+                            {
                                 backgroundColor: theme.colors.surface,
                                 borderColor: theme.colors.border
                             }
@@ -183,7 +188,7 @@ const AuthScreen = () => {
                         disabled={isLoading}
                     >
                         <Text style={[
-                            styles.secondaryButtonText, 
+                            styles.secondaryButtonText,
                             { color: theme.colors.text, fontSize: theme.fontSize.sm }
                         ]}>
                             {isSignUp ? "Already have an account? " : "Don't have an account? "}
@@ -192,6 +197,21 @@ const AuthScreen = () => {
                             </Text>
                         </Text>
                     </TouchableOpacity>
+
+                    {/* Terms of Service Link */}
+                    {isSignUp && (
+                        <View style={styles.termsContainer}>
+                            <Text style={[styles.termsText, { color: theme.colors.textSecondary, fontSize: theme.fontSize.xs }]}>
+                                By creating an account, you agree to our{' '}
+                                <Text
+                                    style={[styles.termsLink, { color: theme.colors.primary }]}
+                                    onPress={() => navigation.navigate('TermsOfService')}
+                                >
+                                    Terms of Service
+                                </Text>
+                            </Text>
+                        </View>
+                    )}
                 </View>
             </ScrollView>
         </KeyboardAvoidingView>
@@ -318,6 +338,18 @@ const styles = StyleSheet.create({
     },
     linkText: {
         fontWeight: '600',
+    },
+    termsContainer: {
+        marginTop: 16,
+        paddingHorizontal: 8,
+    },
+    termsText: {
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+    termsLink: {
+        fontWeight: '600',
+        textDecorationLine: 'underline',
     },
 });
 

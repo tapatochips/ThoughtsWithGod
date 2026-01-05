@@ -328,7 +328,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                 </Text>
                             </TouchableOpacity>
 
-                            {/* Add this new button for subscription */}
+                            {/* Add button for subscription */}
                             <TouchableOpacity 
                               style={[styles.profileNavButton, { 
                                 backgroundColor: theme.colors.surface,

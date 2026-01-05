@@ -162,7 +162,6 @@ export async function createSubscription(
     const { subscriptionId, stripeCustomerId } = result.data as { subscriptionId: string; stripeCustomerId: string };
     
     // Subscription should be created in Firestore by the Cloud Function
-    // But we'll fetch it to return to the client
     const subscription = await getUserSubscription(user.uid);
     
     if (!subscription) {

@@ -232,10 +232,25 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
           </Text>
         </TouchableOpacity>
       </View>
-      
-      <TouchableOpacity 
+
+      {/* Legal Section */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Legal</Text>
+        <TouchableOpacity
+          style={[styles.legalButton, { borderColor: theme.colors.border }]}
+          onPress={() => navigation.navigate('TermsOfService')}
+        >
+          <Ionicons name="document-text-outline" size={20} color={theme.colors.text} />
+          <Text style={[styles.legalButtonText, { color: theme.colors.text }]}>
+            Terms of Service
+          </Text>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity
         style={[
-          styles.saveButton, 
+          styles.saveButton,
           { backgroundColor: theme.colors.primary },
           isSaving && { opacity: 0.7 }
         ]}
@@ -409,6 +424,19 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  legalButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  legalButtonText: {
+    flex: 1,
+    fontSize: 16,
+    marginLeft: 12,
   },
 });
 

@@ -9,7 +9,7 @@ const getEnvironment = () => {
     FIREBASE_APP_ID: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
     FIREBASE_MEASUREMENT_ID: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
     
-    // Stripe configuration (add these to your .env file)
+    // Stripe configuration
     STRIPE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY,
   };
 };
