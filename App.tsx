@@ -18,7 +18,9 @@ import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
 // providers
 import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeProvider';
+import { TranslationProvider } from './src/context/TranslationContext';
 import ErrorBoundary from './src/components/common/ErrorBoundary';
+import BannerAd from './src/components/ads/BannerAd';
 
 // mock notifications
 import { 
@@ -157,82 +159,85 @@ const navigationTheme = {
   };
 
   return (
-    <NavigationContainer theme={navigationTheme}>
-      <Stack.Navigator
-        screenOptions={{
-          headerStyle: {
-            backgroundColor: theme.colors.card,
-          },
-          headerTintColor: theme.colors.text,
-          headerTitleStyle: {
-            fontSize: theme.fontSize.lg,
-          },
-        }}
-      >
-        {user ? (
-          <>
-            <Stack.Screen 
-              name="VerseDisplay" 
-              component={VerseDisplay} 
-              options={{ title: "Daily Verse" }}
-            />
-            <Stack.Screen 
-              name="BibleReader" 
-              component={BibleReader} 
-              options={{ title: "Bible Reader" }}
-            />
-            <Stack.Screen 
-              name="Favorites" 
-              component={FavoritesScreen} 
-              options={{ title: "My Favorites" }}
-            />
-            <Stack.Screen 
-              name="PrayerBoard" 
-              component={PrayerBoard} 
-              options={{ title: "Prayer Board" }}
-            />
-            <Stack.Screen 
-              name="BiblicalDiscussions" 
-              component={BiblicalDiscussions} 
-              options={{ title: "Biblical Discussions" }}
-            />
-            <Stack.Screen 
-              name="ProfileSetup" 
-              component={ProfileSetup} 
-              options={{ title: "Profile Settings" }}
-            />
-            <Stack.Screen 
-              name="Subscription" 
-              component={SubscriptionScreen} 
-              options={{ title: "Premium Subscription" }}
-            />
-            <Stack.Screen
-              name="ReceiptViewer"
-              component={ReceiptViewer}
-              options={{ title: "Receipt" }}
-            />
-            <Stack.Screen
-              name="TermsOfService"
-              component={TermsOfServiceScreen}
-              options={{ title: "Terms of Service" }}
-            />
-          </>
-        ) : (
-          <>
-            <Stack.Screen
-              name="Auth"
-              component={AuthScreen}
-              options={{ title: "Sign In" }}
-            />
-            <Stack.Screen
-              name="TermsOfService"
-              component={TermsOfServiceScreen}
-              options={{ title: "Terms of Service" }}
-            />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer theme={navigationTheme}>
+        <Stack.Navigator
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: theme.colors.card,
+            },
+            headerTintColor: theme.colors.text,
+            headerTitleStyle: {
+              fontSize: theme.fontSize.lg,
+            },
+          }}
+        >
+          {user ? (
+            <>
+              <Stack.Screen
+                name="VerseDisplay"
+                component={VerseDisplay}
+                options={{ title: "Daily Verse" }}
+              />
+              <Stack.Screen
+                name="BibleReader"
+                component={BibleReader}
+                options={{ title: "Bible Reader" }}
+              />
+              <Stack.Screen
+                name="Favorites"
+                component={FavoritesScreen}
+                options={{ title: "My Favorites" }}
+              />
+              <Stack.Screen
+                name="PrayerBoard"
+                component={PrayerBoard}
+                options={{ title: "Prayer Board" }}
+              />
+              <Stack.Screen
+                name="BiblicalDiscussions"
+                component={BiblicalDiscussions}
+                options={{ title: "Biblical Discussions" }}
+              />
+              <Stack.Screen
+                name="ProfileSetup"
+                component={ProfileSetup}
+                options={{ title: "Profile Settings" }}
+              />
+              <Stack.Screen
+                name="Subscription"
+                component={SubscriptionScreen}
+                options={{ title: "Premium Subscription" }}
+              />
+              <Stack.Screen
+                name="ReceiptViewer"
+                component={ReceiptViewer}
+                options={{ title: "Receipt" }}
+              />
+              <Stack.Screen
+                name="TermsOfService"
+                component={TermsOfServiceScreen}
+                options={{ title: "Terms of Service" }}
+              />
+            </>
+          ) : (
+            <>
+              <Stack.Screen
+                name="Auth"
+                component={AuthScreen}
+                options={{ title: "Sign In" }}
+              />
+              <Stack.Screen
+                name="TermsOfService"
+                component={TermsOfServiceScreen}
+                options={{ title: "Terms of Service" }}
+              />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+      <BannerAd />
+    </>
   );
 };
 
@@ -241,7 +246,9 @@ const App = () => {
     <ErrorBoundary>
       <FirebaseProvider>
         <ThemeProvider>
-          <AppContent />
+          <TranslationProvider>
+            <AppContent />
+          </TranslationProvider>
         </ThemeProvider>
       </FirebaseProvider>
     </ErrorBoundary>

@@ -15,30 +15,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  deleteDoc, 
+import { useTranslation, Verse } from '../context/TranslationContext';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
   onSnapshot,
-  updateDoc,
-  getDoc,
-  Timestamp 
+  Timestamp
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import RenderHtml from 'react-native-render-html';
 import { useWindowDimensions } from 'react-native';
-import { NavigationProp, ParamListBase, RouteProp } from '@react-navigation/native';
-import versesData from '../data/combinedBible.json';
-
-interface Verse {
-  book_id: string;
-  book_name: string;
-  chapter: number;
-  verse: number;
-  text: string;
-  info: string;
-}
 
 interface BookInfo {
   book_id: string;
@@ -70,6 +58,7 @@ interface FavoriteVerse {
 const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, route }) => {
   const { user, db } = useFirebase();
   const { theme } = useTheme();
+  const { currentTranslation, availableTranslations, setTranslation, getVerses } = useTranslation();
   const { width } = useWindowDimensions();
   const [verses, setVerses] = useState<Verse[]>([]);
   const [currentBook, setCurrentBook] = useState('GEN');
@@ -77,6 +66,7 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
   const [loading, setLoading] = useState(true);
   const [showBookSelector, setShowBookSelector] = useState(false);
   const [showChapterSelector, setShowChapterSelector] = useState(false);
+  const [showTranslationSelector, setShowTranslationSelector] = useState(false);
   const [books, setBooks] = useState<BookInfo[]>([]);
   const [selectedVerses, setSelectedVerses] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
@@ -85,9 +75,9 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
 
   // Extract unique books from verses data
   useEffect(() => {
-    const versesArray = versesData as Verse[];
+    const versesArray = getVerses();
     const bookMap = new Map<string, BookInfo>();
-    
+
     versesArray.forEach(verse => {
       if (!bookMap.has(verse.book_id)) {
         bookMap.set(verse.book_id, {
@@ -104,7 +94,7 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
 
     const booksArray = Array.from(bookMap.values());
     setBooks(booksArray);
-    
+
     // Handle navigation parameters
     const params = route?.params;
     if (params?.book && params?.chapter) {
@@ -114,17 +104,17 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
         setCurrentChapter(params.chapter);
       }
     }
-  }, [route?.params]);
+  }, [route?.params, currentTranslation]);
 
   // Load verses for current book/chapter
   useEffect(() => {
-    const versesArray = versesData as Verse[];
+    const versesArray = getVerses();
     const filteredVerses = versesArray.filter(
       verse => verse.book_id === currentBook && verse.chapter === currentChapter
     );
     setVerses(filteredVerses);
     setLoading(false);
-  }, [currentBook, currentChapter]);
+  }, [currentBook, currentChapter, currentTranslation]);
 
   // Load user's reading progress
   useEffect(() => {
@@ -357,10 +347,21 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
           </TouchableOpacity>
         </View>
 
+        {/* Translation selector */}
+        <TouchableOpacity
+          style={[styles.translationButton, { backgroundColor: `${theme.colors.primary}15` }]}
+          onPress={() => setShowTranslationSelector(true)}
+        >
+          <Text style={[styles.translationText, { color: theme.colors.primary }]}>
+            {currentTranslation.abbreviation}
+          </Text>
+          <Ionicons name="chevron-down" size={14} color={theme.colors.primary} />
+        </TouchableOpacity>
+
         {/* Action buttons */}
         <View style={styles.actionButtons}>
           {readingProgress && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.actionButton, { backgroundColor: `${theme.colors.success}20` }]}
               onPress={goToReadingProgress}
             >
@@ -546,7 +547,7 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
                   key={chapter}
                   style={[
                     styles.chapterButton,
-                    { 
+                    {
                       backgroundColor: chapter === currentChapter ? theme.colors.primary : `${theme.colors.primary}15`,
                       borderColor: theme.colors.primary
                     }
@@ -565,6 +566,58 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
                 </TouchableOpacity>
               ))}
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Translation Selector Modal */}
+      <Modal
+        visible={showTranslationSelector}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowTranslationSelector(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.colors.card }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: theme.colors.divider }]}>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
+                Select Translation
+              </Text>
+              <TouchableOpacity onPress={() => setShowTranslationSelector(false)}>
+                <Ionicons name="close" size={24} color={theme.colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <FlatList
+              data={availableTranslations}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.modalItem,
+                    {
+                      backgroundColor: item.id === currentTranslation.id ? `${theme.colors.primary}15` : 'transparent'
+                    }
+                  ]}
+                  onPress={() => {
+                    setTranslation(item.id);
+                    setShowTranslationSelector(false);
+                  }}
+                >
+                  <View style={styles.translationInfo}>
+                    <Text style={[styles.modalItemText, { color: theme.colors.text }]}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.translationDescription, { color: theme.colors.textSecondary }]}>
+                      {item.description}
+                    </Text>
+                  </View>
+                  <Text style={[styles.translationAbbrev, { color: theme.colors.primary }]}>
+                    {item.abbreviation}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
           </View>
         </View>
       </Modal>
@@ -730,6 +783,30 @@ const styles = StyleSheet.create({
   chapterButtonText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  translationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginRight: 8,
+  },
+  translationText: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  translationInfo: {
+    flex: 1,
+  },
+  translationDescription: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  translationAbbrev: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
 
