@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  FlatList, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
   Alert,
   Modal,
   Platform,
@@ -16,15 +16,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
-import { 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  doc, 
-  deleteDoc, 
-  updateDoc, 
-  query, 
-  orderBy, 
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  doc,
+  deleteDoc,
+  updateDoc,
+  query,
+  orderBy,
   Timestamp,
   arrayUnion,
   arrayRemove,
@@ -32,13 +32,13 @@ import {
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { validatePrayer, validateComment, LIMITS } from '../utils/inputValidation';
 
 interface Comment {
   id: string;
   text: string;
   userId: string;
-  userEmail: string;
-  username?: string;
+  username: string;
   createdAt: any;
 }
 
@@ -46,12 +46,11 @@ interface BiblicalDiscussion {
   id: string;
   text: string;
   userId: string;
-  userEmail: string;
-  username?: string;
+  username: string;
   createdAt: any;
   likedBy: string[];
   commentCount: number;
-  topic?: string; // Optional topic/category
+  topic?: string;
 }
 
 const BiblicalDiscussions: React.FC = () => {
@@ -133,23 +132,29 @@ const BiblicalDiscussions: React.FC = () => {
 
   const handleAddDiscussion = async () => {
     if (!user || !db || !newDiscussion.trim()) return;
+
+    // Validate and sanitize input
+    const validation = validatePrayer(newDiscussion);
+    if (!validation.valid) {
+      Alert.alert("Invalid Input", validation.error);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const discussionsCollection = collection(db, 'biblical-discussions');
       await addDoc(discussionsCollection, {
-        text: newDiscussion.trim(),
+        text: validation.sanitized,
         userId: user.uid,
-        userEmail: user.email,
-        username: userProfile?.username || user.email?.split('@')[0] || 'Anonymous',
+        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
         createdAt: Timestamp.now(),
         likedBy: [],
         commentCount: 0
       });
-      
+
       setNewDiscussion('');
     } catch (error) {
-      console.error("Error adding biblical discussion:", error);
       Alert.alert("Error", "Failed to add discussion. Please try again.");
     } finally {
       setSubmitting(false);
@@ -228,29 +233,35 @@ const BiblicalDiscussions: React.FC = () => {
 
   const handleAddComment = async () => {
     if (!user || !db || !selectedDiscussion || !newComment.trim()) return;
+
+    // Validate and sanitize input
+    const validation = validateComment(newComment);
+    if (!validation.valid) {
+      Alert.alert("Invalid Input", validation.error);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const commentsCollection = collection(db, `biblical-discussions/${selectedDiscussion.id}/comments`);
-      
+
       // Add the comment
       await addDoc(commentsCollection, {
-        text: newComment.trim(),
+        text: validation.sanitized,
         userId: user.uid,
-        userEmail: user.email,
-        username: userProfile?.username || user.email?.split('@')[0] || 'Anonymous',
+        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
         createdAt: Timestamp.now()
       });
-      
+
       // Update comment count on the discussion document
       const discussionDoc = doc(db, 'biblical-discussions', selectedDiscussion.id);
       await updateDoc(discussionDoc, {
         commentCount: (selectedDiscussion.commentCount || 0) + 1
       });
-      
+
       setNewComment('');
     } catch (error) {
-      console.error("Error adding comment:", error);
       Alert.alert("Error", "Failed to add comment. Please try again.");
     } finally {
       setSubmitting(false);
@@ -349,7 +360,11 @@ const BiblicalDiscussions: React.FC = () => {
             placeholder="Share your biblical thoughts, insights, or questions..."
             placeholderTextColor={theme.colors.secondary}
             multiline
+            maxLength={LIMITS.PRAYER_MAX_LENGTH}
           />
+          <Text style={[styles.charCount, { color: theme.colors.textSecondary }]}>
+            {newDiscussion.length}/{LIMITS.PRAYER_MAX_LENGTH}
+          </Text>
           <TouchableOpacity 
             style={[
               styles.addButton, 
@@ -388,12 +403,12 @@ const BiblicalDiscussions: React.FC = () => {
                 <View style={styles.userInfo}>
                   <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
                     <Text style={styles.avatarText}>
-                      {(item.username || item.userEmail)[0].toUpperCase()}
+                      {(item.username || 'U')[0].toUpperCase()}
                     </Text>
                   </View>
                   <View>
                     <Text style={[styles.username, { color: theme.colors.text }]}>
-                      {item.username || item.userEmail?.split('@')[0]}
+                      {item.username || 'User'}
                     </Text>
                     <Text style={[styles.discussionDate, { color: theme.colors.textSecondary }]}>
                       {formatDate(item.createdAt)}
@@ -514,12 +529,12 @@ const BiblicalDiscussions: React.FC = () => {
                     <View style={styles.userInfo}>
                       <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
                         <Text style={styles.avatarText}>
-                          {(selectedDiscussion.username || selectedDiscussion.userEmail)[0].toUpperCase()}
+                          {(selectedDiscussion.username || 'U')[0].toUpperCase()}
                         </Text>
                       </View>
                       <View>
                         <Text style={[styles.username, { color: theme.colors.text }]}>
-                          {selectedDiscussion.username || selectedDiscussion.userEmail?.split('@')[0]}
+                          {selectedDiscussion.username || 'User'}
                         </Text>
                         <Text style={[styles.discussionDate, { color: theme.colors.textSecondary }]}>
                           {formatDate(selectedDiscussion.createdAt)}
@@ -567,11 +582,11 @@ const BiblicalDiscussions: React.FC = () => {
                           }
                         ]}>
                           <Text style={styles.smallAvatarText}>
-                            {(item.username || item.userEmail)[0].toUpperCase()}
+                            {(item.username || 'U')[0].toUpperCase()}
                           </Text>
                         </View>
                         <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
-                          {item.username || item.userEmail?.split('@')[0]}
+                          {item.username || 'User'}
                         </Text>
                       </View>
                       
@@ -932,6 +947,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  charCount: {
+    fontSize: 12,
+    textAlign: 'right',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
 });
 

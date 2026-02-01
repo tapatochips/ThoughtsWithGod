@@ -34,7 +34,7 @@ interface CreateSubscriptionData {
 
 export const createSubscription = onCall<CreateSubscriptionData>(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -145,7 +145,7 @@ interface PaymentIntentData {
 
 export const createPaymentIntent = onCall<PaymentIntentData>(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -184,56 +184,16 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
     }
 );
 
-// Create a payment method (for testing - in production use Stripe SDK on client)
-interface CreatePaymentMethodData {
-    card: {
-        number: string;
-        expMonth: number;
-        expYear: number;
-        cvc: string;
-    };
-}
-
-export const createPaymentMethod = onCall<CreatePaymentMethodData>(
-    {
-        cors: true,
-        secrets: ['STRIPE_SECRET_KEY'],
-    },
-    async (request) => {
-        if (!request.auth) {
-            throw new HttpsError('unauthenticated', 'Must be logged in');
-        }
-
-        const { card } = request.data;
-
-        try {
-            // WARNING: This is for testing only!
-            // In production, use Stripe Elements or React Native SDK on the client
-            const paymentMethod = await stripe.paymentMethods.create({
-                type: 'card',
-                card: {
-                    number: card.number,
-                    exp_month: card.expMonth,
-                    exp_year: card.expYear,
-                    cvc: card.cvc,
-                },
-            });
-
-            return {
-                paymentMethodId: paymentMethod.id,
-            };
-        } catch (error: any) {
-            console.error('Error creating payment method:', error);
-            throw new HttpsError('internal', error.message || 'Failed to create payment method');
-        }
-    }
-);
+// NOTE: Payment methods should be created client-side using Stripe Elements or
+// React Native Stripe SDK for PCI-DSS compliance. Never handle raw card data
+// on the server. The client should use @stripe/stripe-react-native to create
+// payment methods and pass the paymentMethodId to the server.
 
 // =================== SUBSCRIPTION MANAGEMENT ===================
 
 export const cancelSubscription = onCall(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -284,7 +244,7 @@ interface ToggleAutoRenewData {
 
 export const toggleAutoRenew = onCall<ToggleAutoRenewData>(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -332,7 +292,7 @@ export const toggleAutoRenew = onCall<ToggleAutoRenewData>(
 // Get customer's payment methods
 export const getPaymentMethods = onCall(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -379,7 +339,7 @@ interface UpdatePaymentMethodData {
 
 export const updateDefaultPaymentMethod = onCall<UpdatePaymentMethodData>(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -416,9 +376,29 @@ export const updateDefaultPaymentMethod = onCall<UpdatePaymentMethodData>(
 
 // =================== VALIDATION FUNCTIONS ===================
 
+// Allowed origins for CORS (update with your actual domains)
+const ALLOWED_ORIGINS = [
+    'https://thoughtswithgod.com',
+    'https://www.thoughtswithgod.com',
+    'http://localhost:19006', // Expo web dev
+    'http://localhost:8081',  // Metro bundler
+];
+
+// Helper function to get CORS config
+function getCorsConfig() {
+    // In production, use specific origins; in development, allow all
+    const isDev = process.env.FUNCTIONS_EMULATOR === 'true';
+    return isDev ? true : ALLOWED_ORIGINS;
+}
+
+/**
+ * Server-side premium status validation
+ * This function validates premium status against both Firestore AND Stripe
+ * to prevent client-side bypass attacks
+ */
 export const validateSubscription = onCall(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['STRIPE_SECRET_KEY'],
     },
     async (request) => {
@@ -432,6 +412,8 @@ export const validateSubscription = onCall(
             // Get subscription from Firestore
             const subscriptionDoc = await admin.firestore().collection('subscriptions').doc(userId).get();
             if (!subscriptionDoc.exists) {
+                // Also check userProfiles and sync if needed
+                await syncPremiumStatus(userId, false);
                 return { active: false };
             }
 
@@ -439,17 +421,29 @@ export const validateSubscription = onCall(
             const stripeSubscriptionId = subscriptionData?.stripeSubscriptionId;
 
             if (!stripeSubscriptionId) {
+                await syncPremiumStatus(userId, false);
                 return { active: false };
             }
 
-            // Validate with Stripe
+            // Validate with Stripe (source of truth)
             const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
             const isActive = subscription.status === 'active' || subscription.status === 'trialing';
+
+            // If Stripe says inactive, update our records
+            if (!isActive) {
+                await syncPremiumStatus(userId, false);
+                return { active: false };
+            }
 
             // Check if subscription end date is in the future
             const now = admin.firestore.Timestamp.now();
             const endDate = subscriptionData.endDate;
             const isNotExpired = endDate && endDate.toMillis() > now.toMillis();
+
+            // Sync status if needed
+            if (!isNotExpired) {
+                await syncPremiumStatus(userId, false);
+            }
 
             return {
                 active: isActive && isNotExpired,
@@ -463,6 +457,97 @@ export const validateSubscription = onCall(
         }
     }
 );
+
+/**
+ * Check if user has premium access for a specific feature
+ * Use this before allowing access to premium-only features
+ */
+export const checkPremiumAccess = onCall(
+    {
+        cors: getCorsConfig(),
+        secrets: ['STRIPE_SECRET_KEY'],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError('unauthenticated', 'Must be logged in');
+        }
+
+        const userId = request.auth.uid;
+        const { feature } = request.data as { feature?: string };
+
+        try {
+            // Get subscription status
+            const subscriptionDoc = await admin.firestore().collection('subscriptions').doc(userId).get();
+
+            if (!subscriptionDoc.exists) {
+                return { hasAccess: false, reason: 'no_subscription' };
+            }
+
+            const subscriptionData = subscriptionDoc.data();
+
+            // Check status
+            if (subscriptionData?.status !== 'active') {
+                return { hasAccess: false, reason: 'subscription_inactive' };
+            }
+
+            // Check expiry
+            const now = admin.firestore.Timestamp.now();
+            const endDate = subscriptionData?.endDate;
+            if (endDate && endDate.toMillis() < now.toMillis()) {
+                // Expired - update status and deny access
+                await syncPremiumStatus(userId, false);
+                return { hasAccess: false, reason: 'subscription_expired' };
+            }
+
+            // Validate with Stripe for extra security on sensitive features
+            if (feature === 'sensitive' && subscriptionData?.stripeSubscriptionId) {
+                const subscription = await stripe.subscriptions.retrieve(subscriptionData.stripeSubscriptionId);
+                if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+                    await syncPremiumStatus(userId, false);
+                    return { hasAccess: false, reason: 'stripe_validation_failed' };
+                }
+            }
+
+            return {
+                hasAccess: true,
+                plan: subscriptionData?.planId,
+                expiresAt: endDate?.toDate().toISOString(),
+            };
+        } catch (error: any) {
+            console.error('Premium access check failed:', error);
+            return { hasAccess: false, reason: 'error' };
+        }
+    }
+);
+
+/**
+ * Helper function to sync premium status in userProfiles
+ * This ensures the client-side cached status matches server reality
+ */
+async function syncPremiumStatus(userId: string, isPremium: boolean, plan?: string, expiry?: Date): Promise<void> {
+    try {
+        const updateData: Record<string, any> = {
+            isPremium,
+            premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        if (isPremium && plan) {
+            updateData.premiumPlan = plan;
+        } else if (!isPremium) {
+            updateData.premiumPlan = null;
+        }
+
+        if (isPremium && expiry) {
+            updateData.premiumExpiry = admin.firestore.Timestamp.fromDate(expiry);
+        } else if (!isPremium) {
+            updateData.premiumExpiry = null;
+        }
+
+        await admin.firestore().collection('userProfiles').doc(userId).update(updateData);
+    } catch (error) {
+        console.error('Failed to sync premium status:', error);
+    }
+}
 
 // =================== EMAIL FUNCTIONS ===================
 
@@ -479,7 +564,7 @@ interface ReceiptEmailData {
 
 export const sendReceiptEmail = onCall<ReceiptEmailData>(
     {
-        cors: true,
+        cors: getCorsConfig(),
         secrets: ['EMAIL_USER', 'EMAIL_PASS'],
     },
     async (request) => {

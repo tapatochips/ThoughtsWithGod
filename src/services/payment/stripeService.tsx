@@ -58,32 +58,19 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     }
 ];
 
-// Create a payment method (for credit cards)
-export async function createPaymentMethod(cardDetails: {
-    number: string;
-    expMonth: number;
-    expYear: number;
-    cvc: string;
-}): Promise<string | null> {
-
-    // For now, create a payment method on the server
-    try {
-        if (!functions) {
-            console.error('Firebase functions not initialized');
-            return null;
-        }
-
-        const createPaymentMethodFunction = httpsCallable(functions, 'createPaymentMethod');
-        const result = await createPaymentMethodFunction({
-            card: cardDetails
-        });
-
-        return (result.data as any).paymentMethodId;
-    } catch (error) {
-        console.error('Error creating payment method:', error);
-        return null;
-    }
-}
+// IMPORTANT: Payment methods must be created client-side using @stripe/stripe-react-native
+// for PCI-DSS compliance. Never pass raw card details through your server.
+//
+// To implement properly:
+// 1. Install: npm install @stripe/stripe-react-native
+// 2. Use CardField or CardForm component to collect card details
+// 3. Call confirmPayment() or createPaymentMethod() from the Stripe SDK
+// 4. Pass the resulting paymentMethodId to your backend
+//
+// Example:
+// import { useStripe } from '@stripe/stripe-react-native';
+// const { createPaymentMethod } = useStripe();
+// const { paymentMethod, error } = await createPaymentMethod({ paymentMethodType: 'Card' });
 
 // Create a subscription
 export async function createSubscription(

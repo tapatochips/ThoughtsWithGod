@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  FlatList, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
   Alert,
   Modal,
   Platform,
@@ -16,15 +16,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
-import { 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  doc, 
-  deleteDoc, 
-  updateDoc, 
-  query, 
-  orderBy, 
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  doc,
+  deleteDoc,
+  updateDoc,
+  query,
+  orderBy,
   Timestamp,
   arrayUnion,
   arrayRemove,
@@ -32,13 +32,13 @@ import {
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { validatePrayer, validateComment, LIMITS } from '../utils/inputValidation';
 
 interface Comment {
   id: string;
   text: string;
   userId: string;
-  userEmail: string;
-  username?: string;
+  username: string;
   createdAt: any;
 }
 
@@ -46,8 +46,7 @@ interface PrayerRequest {
   id: string;
   text: string;
   userId: string;
-  userEmail: string;
-  username?: string;
+  username: string;
   createdAt: any;
   answered: boolean;
   likedBy: string[];
@@ -135,26 +134,32 @@ const PrayerBoard: React.FC = () => {
 
   const handleAddPrayer = async () => {
     if (!user || !db || !newPrayer.trim()) return;
+
+    // Validate and sanitize input
+    const validation = validatePrayer(newPrayer);
+    if (!validation.valid) {
+      Alert.alert("Invalid Input", validation.error);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const prayersCollection = collection(db, 'prayers');
       await addDoc(prayersCollection, {
-        text: newPrayer.trim(),
+        text: validation.sanitized,
         userId: user.uid,
-        userEmail: user.email,
-        username: userProfile?.username || user.email?.split('@')[0] || 'Anonymous',
+        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
         createdAt: Timestamp.now(),
         answered: false,
         likedBy: [],
         commentCount: 0,
         isAnonymous: isAnonymous
       });
-      
+
       setNewPrayer('');
       setIsAnonymous(false);
     } catch (error) {
-      console.error("Error adding prayer request:", error);
       Alert.alert("Error", "Failed to add prayer request. Please try again.");
     } finally {
       setSubmitting(false);
@@ -246,29 +251,35 @@ const PrayerBoard: React.FC = () => {
 
   const handleAddComment = async () => {
     if (!user || !db || !selectedPrayer || !newComment.trim()) return;
+
+    // Validate and sanitize input
+    const validation = validateComment(newComment);
+    if (!validation.valid) {
+      Alert.alert("Invalid Input", validation.error);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const commentsCollection = collection(db, `prayers/${selectedPrayer.id}/comments`);
-      
+
       // Add the comment
       await addDoc(commentsCollection, {
-        text: newComment.trim(),
+        text: validation.sanitized,
         userId: user.uid,
-        userEmail: user.email,
-        username: userProfile?.username || user.email?.split('@')[0] || 'Anonymous',
+        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
         createdAt: Timestamp.now()
       });
-      
+
       // Update comment count on the prayer document
       const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
       await updateDoc(prayerDoc, {
         commentCount: (selectedPrayer.commentCount || 0) + 1
       });
-      
+
       setNewComment('');
     } catch (error) {
-      console.error("Error adding comment:", error);
       Alert.alert("Error", "Failed to add comment. Please try again.");
     } finally {
       setSubmitting(false);
@@ -367,7 +378,11 @@ const PrayerBoard: React.FC = () => {
             placeholder="Enter your prayer request..."
             placeholderTextColor={theme.colors.secondary}
             multiline
+            maxLength={LIMITS.PRAYER_MAX_LENGTH}
           />
+          <Text style={[styles.charCount, { color: theme.colors.textSecondary }]}>
+            {newPrayer.length}/{LIMITS.PRAYER_MAX_LENGTH}
+          </Text>
           
           <View style={styles.anonymousToggleContainer}>
             <TouchableOpacity
@@ -424,12 +439,12 @@ const PrayerBoard: React.FC = () => {
                 <View style={styles.userInfo}>
                   <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
                     <Text style={styles.avatarText}>
-                      {item.isAnonymous ? '?' : (item.username || item.userEmail)[0].toUpperCase()}
+                      {item.isAnonymous ? '?' : (item.username || 'U')[0].toUpperCase()}
                     </Text>
                   </View>
                   <View>
                     <Text style={[styles.username, { color: theme.colors.text }]}>
-                      {item.isAnonymous ? 'Anonymous' : (item.username || item.userEmail?.split('@')[0])}
+                      {item.isAnonymous ? 'Anonymous' : (item.username || 'User')}
                     </Text>
                     <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
                       {formatDate(item.createdAt)}
@@ -575,12 +590,12 @@ const PrayerBoard: React.FC = () => {
                     <View style={styles.userInfo}>
                       <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
                         <Text style={styles.avatarText}>
-                          {selectedPrayer.isAnonymous ? '?' : (selectedPrayer.username || selectedPrayer.userEmail)[0].toUpperCase()}
+                          {selectedPrayer.isAnonymous ? '?' : (selectedPrayer.username || 'U')[0].toUpperCase()}
                         </Text>
                       </View>
                       <View>
                         <Text style={[styles.username, { color: theme.colors.text }]}>
-                          {selectedPrayer.isAnonymous ? 'Anonymous' : (selectedPrayer.username || selectedPrayer.userEmail?.split('@')[0])}
+                          {selectedPrayer.isAnonymous ? 'Anonymous' : (selectedPrayer.username || 'User')}
                         </Text>
                         <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
                           {formatDate(selectedPrayer.createdAt)}
@@ -634,11 +649,11 @@ const PrayerBoard: React.FC = () => {
                           }
                         ]}>
                           <Text style={styles.smallAvatarText}>
-                            {(item.username || item.userEmail)[0].toUpperCase()}
+                            {(item.username || 'U')[0].toUpperCase()}
                           </Text>
                         </View>
                         <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
-                          {item.username || item.userEmail?.split('@')[0]}
+                          {item.username || 'User'}
                         </Text>
                       </View>
                       
@@ -1030,6 +1045,12 @@ const styles = StyleSheet.create({
   },
   anonymousLabel: {
     fontSize: 14,
+  },
+  charCount: {
+    fontSize: 12,
+    textAlign: 'right',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
 });
 

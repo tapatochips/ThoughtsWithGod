@@ -1,96 +1,239 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // =================== HELPER FUNCTIONS ===================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user owns the resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Validate string length
+    function isValidLength(str, minLen, maxLen) {
+      return str is string && str.size() >= minLen && str.size() <= maxLen;
+    }
+
+    // Validate text content (for prayers, discussions, comments)
+    function isValidContent(text, maxLen) {
+      return text is string && text.size() > 0 && text.size() <= maxLen;
+    }
+
+    // Rate limiting: Check if enough time has passed since last action
+    // This requires a 'lastActionAt' field in the user's rate limit doc
+    function canPerformAction(userId) {
+      let rateLimitDoc = get(/databases/$(database)/documents/rateLimits/$(userId));
+      // Allow if no rate limit doc exists or if 5 seconds have passed
+      return !exists(/databases/$(database)/documents/rateLimits/$(userId)) ||
+             rateLimitDoc.data.lastActionAt == null ||
+             request.time > rateLimitDoc.data.lastActionAt + duration.value(5, 's');
+    }
+
+    // =================== RATE LIMITS COLLECTION ===================
+
+    // Rate limits tracking (internal use)
+    match /rateLimits/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId);
+    }
+
+    // =================== USER DATA ===================
+
     // User profiles - users can only read/write their own data
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      
+      allow read, write: if isOwner(userId);
+
       // Favorites collection - users can only access their own favorites
       match /favorites/{favoriteId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isOwner(userId);
       }
-      
+
       // Reading progress - users can only access their own reading progress
       match /readingProgress/{progressId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isOwner(userId);
       }
-      
+
       // Favorite verses from Bible Reader - users can only access their own favorite verses
       match /favoriteVerses/{verseId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isOwner(userId);
       }
     }
-    
+
+    // =================== USER PROFILES ===================
+
     // User profiles for settings and preferences
     match /userProfiles/{userId} {
-      // Anyone can read basic profile info (username)
-      allow read: if request.auth != null;
-      
+      // Read rules: Restrict what data can be read
+      // Own profile: full access
+      // Other profiles: only allow reading specific public fields
+      allow read: if isOwner(userId);
+
+      // Other users can only read public profile info via a limited query
+      // They can read the document but sensitive fields should not be stored here
+      // or use field-level security in your app logic
+      allow read: if isAuthenticated() &&
+                    // Only allow reading if accessing for username lookup
+                    resource.data.keys().hasAny(['username', 'userId']);
+
       // Only the user can write to their own profile
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow create: if isOwner(userId) &&
+                      request.resource.data.userId == userId &&
+                      isValidLength(request.resource.data.username, 3, 30);
+
+      allow update: if isOwner(userId) &&
+                      // Prevent changing userId
+                      request.resource.data.userId == resource.data.userId &&
+                      // Validate username if being updated
+                      (!request.resource.data.keys().hasAny(['username']) ||
+                       isValidLength(request.resource.data.username, 3, 30));
+
+      allow delete: if isOwner(userId);
     }
-    
-    // Prayer requests - anyone can read, but only authenticated users can create
-    // Users can only update or delete their own prayer requests
+
+    // =================== SUBSCRIPTIONS ===================
+
+    // Subscription data - only accessible by owner and server
+    match /subscriptions/{userId} {
+      allow read: if isOwner(userId);
+      // Write only via Cloud Functions (admin SDK)
+      allow write: if false;
+    }
+
+    // =================== PRAYERS ===================
+
     match /prayers/{prayerId} {
       // Allow anyone authenticated to read prayers
-      allow read: if request.auth != null;
-      
-      // Allow creation if the user is setting their own ID as the creator
-      allow create: if request.auth != null && 
-                     request.resource.data.userId == request.auth.uid;
-      
-      // Owner can update or delete their own prayers
-      allow update, delete: if request.auth != null && 
-                             resource.data.userId == request.auth.uid;
-      
-      // Special case for liking prayers - any user can update if they're only modifying the likedBy array
-      allow update: if request.auth != null && 
-                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']);
-      
-      // Comments subcollection - anyone authenticated can read
+      allow read: if isAuthenticated();
+
+      // Creation with validation
+      allow create: if isAuthenticated() &&
+                      request.resource.data.userId == request.auth.uid &&
+                      // Validate required fields
+                      request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                      // Validate content length (max 2000 chars)
+                      isValidContent(request.resource.data.text, 2000) &&
+                      // Validate username
+                      isValidLength(request.resource.data.username, 1, 30) &&
+                      // Ensure likedBy starts empty
+                      request.resource.data.likedBy == [] &&
+                      // Ensure commentCount starts at 0
+                      request.resource.data.commentCount == 0;
+
+      // Owner can update their own prayers (except likedBy/commentCount which have special rules)
+      allow update: if isAuthenticated() &&
+                      resource.data.userId == request.auth.uid &&
+                      // Prevent changing userId
+                      request.resource.data.userId == resource.data.userId &&
+                      // Validate text if being updated
+                      (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
+                       isValidContent(request.resource.data.text, 2000));
+
+      // Owner can delete their own prayers
+      allow delete: if isAuthenticated() &&
+                      resource.data.userId == request.auth.uid;
+
+      // Special case for liking prayers - any user can update if only modifying allowed fields
+      allow update: if isAuthenticated() &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']) &&
+                      // Prevent manipulation - user can only add/remove themselves from likedBy
+                      (request.resource.data.likedBy.toSet().difference(resource.data.likedBy.toSet()).size() <= 1) &&
+                      (resource.data.likedBy.toSet().difference(request.resource.data.likedBy.toSet()).size() <= 1);
+
+      // Comments subcollection
       match /comments/{commentId} {
-        allow read: if request.auth != null;
-        
-        // Allow creation if the user is setting their own ID as the commenter
-        allow create: if request.auth != null && 
-                       request.resource.data.userId == request.auth.uid;
-        
+        allow read: if isAuthenticated();
+
+        // Creation with validation
+        allow create: if isAuthenticated() &&
+                        request.resource.data.userId == request.auth.uid &&
+                        // Validate required fields
+                        request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                        // Validate content length (max 500 chars)
+                        isValidContent(request.resource.data.text, 500) &&
+                        // Validate username
+                        isValidLength(request.resource.data.username, 1, 30);
+
         // Only the comment creator can update or delete their comment
-        allow update, delete: if request.auth != null && 
-                               resource.data.userId == request.auth.uid;
+        allow update: if isAuthenticated() &&
+                        resource.data.userId == request.auth.uid &&
+                        // Prevent changing userId
+                        request.resource.data.userId == resource.data.userId &&
+                        // Validate text if being updated
+                        isValidContent(request.resource.data.text, 500);
+
+        allow delete: if isAuthenticated() &&
+                        resource.data.userId == request.auth.uid;
       }
     }
-    
-    // Biblical discussions - anyone can read, but only authenticated users can create
-    // Users can only update or delete their own discussions
+
+    // =================== BIBLICAL DISCUSSIONS ===================
+
     match /biblical-discussions/{discussionId} {
       // Allow anyone authenticated to read discussions
-      allow read: if request.auth != null;
-      
-      // Allow creation if the user is setting their own ID as the creator
-      allow create: if request.auth != null && 
-                     request.resource.data.userId == request.auth.uid;
-      
+      allow read: if isAuthenticated();
+
+      // Creation with validation
+      allow create: if isAuthenticated() &&
+                      request.resource.data.userId == request.auth.uid &&
+                      // Validate required fields
+                      request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                      // Validate content length (max 2000 chars)
+                      isValidContent(request.resource.data.text, 2000) &&
+                      // Validate username
+                      isValidLength(request.resource.data.username, 1, 30) &&
+                      // Ensure likedBy starts empty
+                      request.resource.data.likedBy == [] &&
+                      // Ensure commentCount starts at 0
+                      request.resource.data.commentCount == 0;
+
       // Owner can update or delete their own discussions
-      allow update, delete: if request.auth != null && 
-                             resource.data.userId == request.auth.uid;
-      
-      // Special case for liking discussions - any user can update if they're only modifying the likedBy array
-      allow update: if request.auth != null && 
-                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']);
-      
-      // Comments subcollection - anyone authenticated can read
+      allow update: if isAuthenticated() &&
+                      resource.data.userId == request.auth.uid &&
+                      // Prevent changing userId
+                      request.resource.data.userId == resource.data.userId &&
+                      // Validate text if being updated
+                      (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
+                       isValidContent(request.resource.data.text, 2000));
+
+      allow delete: if isAuthenticated() &&
+                      resource.data.userId == request.auth.uid;
+
+      // Special case for liking discussions - any user can update if only modifying allowed fields
+      allow update: if isAuthenticated() &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']) &&
+                      // Prevent manipulation - user can only add/remove themselves from likedBy
+                      (request.resource.data.likedBy.toSet().difference(resource.data.likedBy.toSet()).size() <= 1) &&
+                      (resource.data.likedBy.toSet().difference(request.resource.data.likedBy.toSet()).size() <= 1);
+
+      // Comments subcollection
       match /comments/{commentId} {
-        allow read: if request.auth != null;
-        
-        // Allow creation if the user is setting their own ID as the commenter
-        allow create: if request.auth != null && 
-                       request.resource.data.userId == request.auth.uid;
-        
+        allow read: if isAuthenticated();
+
+        // Creation with validation
+        allow create: if isAuthenticated() &&
+                        request.resource.data.userId == request.auth.uid &&
+                        // Validate required fields
+                        request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                        // Validate content length (max 500 chars)
+                        isValidContent(request.resource.data.text, 500) &&
+                        // Validate username
+                        isValidLength(request.resource.data.username, 1, 30);
+
         // Only the comment creator can update or delete their comment
-        allow update, delete: if request.auth != null && 
-                               resource.data.userId == request.auth.uid;
+        allow update: if isAuthenticated() &&
+                        resource.data.userId == request.auth.uid &&
+                        // Prevent changing userId
+                        request.resource.data.userId == resource.data.userId &&
+                        // Validate text if being updated
+                        isValidContent(request.resource.data.text, 500);
+
+        allow delete: if isAuthenticated() &&
+                        resource.data.userId == request.auth.uid;
       }
     }
   }

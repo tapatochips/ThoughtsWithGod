@@ -1,7 +1,7 @@
-
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { db } from './firebaseReactNative';
+import { validateUsername } from '../../utils/inputValidation';
 
 export interface UserProfile {
   userId: string;
@@ -95,12 +95,13 @@ export async function updateUsername(userId: string, username: string): Promise<
 
   const profileRef = doc(db, 'userProfiles', userId);
 
-  // Check if username is valid (add validation as needed)
-  if (!username || username.length < 3) {
-    throw new Error('Username must be at least 3 characters');
+  // Validate and sanitize username
+  const validation = validateUsername(username);
+  if (!validation.valid) {
+    throw new Error(validation.error || 'Invalid username');
   }
 
-  await updateDoc(profileRef, { username });
+  await updateDoc(profileRef, { username: validation.sanitized });
 }
 
 export async function updateUserPreferences(

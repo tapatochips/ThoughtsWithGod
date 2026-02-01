@@ -1,10 +1,7 @@
-
-import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { db } from './firebaseConfig';
 import { functions, httpsCallable } from './firebaseFunctions';
-import { createPaymentMethod, createSubscription as stripeCreateSubscription } from '../payment/stripeService';
-import { formatDate } from '../../utils/paymentUtils';
 
 export interface SubscriptionPlan {
   id: string;
@@ -100,97 +97,87 @@ export async function getUserSubscription(userId: string): Promise<Subscription 
   return null;
 }
 
-// Create or update a subscription
+/**
+ * Create or update a subscription
+ *
+ * IMPORTANT: Payment method ID must be obtained from the Stripe SDK on the client side.
+ * Use @stripe/stripe-react-native CardField or CardForm to collect card details securely,
+ * then call createPaymentMethod() from the Stripe SDK to get a paymentMethodId.
+ *
+ * Example:
+ * ```
+ * import { useStripe } from '@stripe/stripe-react-native';
+ * const { createPaymentMethod } = useStripe();
+ * const { paymentMethod, error } = await createPaymentMethod({ paymentMethodType: 'Card' });
+ * if (paymentMethod) {
+ *   await createSubscription(user, planId, paymentMethod.id);
+ * }
+ * ```
+ */
 export async function createSubscription(
   user: User,
   planId: string,
-  paymentDetails: {
-    cardNumber?: string;
-    expMonth?: number;
-    expYear?: number;
-    cvc?: string;
-    paymentType: 'credit_card' | 'google_pay' | 'apple_pay';
-  }
+  paymentMethodId: string // Must be obtained from Stripe SDK on client
 ): Promise<{ success: boolean; error?: string; subscription?: Subscription }> {
   if (!db || !user) {
     return { success: false, error: 'Database or user not available' };
   }
-  
+
+  if (!paymentMethodId || !paymentMethodId.startsWith('pm_')) {
+    return { success: false, error: 'Invalid payment method. Please use Stripe SDK to create a payment method.' };
+  }
+
   const selectedPlan = subscriptionPlans.find(plan => plan.id === planId);
   if (!selectedPlan) {
     return { success: false, error: 'Invalid subscription plan' };
   }
-  
+
   try {
-    // Create payment method with Stripe
-    let paymentMethodId: string | null = null;
-    
-    if (paymentDetails.paymentType === 'credit_card' && 
-        paymentDetails.cardNumber && 
-        paymentDetails.expMonth && 
-        paymentDetails.expYear && 
-        paymentDetails.cvc) {
-      
-      paymentMethodId = await createPaymentMethod({
-        number: paymentDetails.cardNumber,
-        expMonth: paymentDetails.expMonth,
-        expYear: paymentDetails.expYear,
-        cvc: paymentDetails.cvc
-      });
-      
-      if (!paymentMethodId) {
-        return { success: false, error: 'Failed to create payment method' };
-      }
-    } else {
-      // For Apple Pay / Google Pay, we would use the payment token instead
-      // This is just a mock for demonstration purposes
-      paymentMethodId = `pm_${Math.random().toString(36).substring(2, 15)}`;
-    }
-    
     // Call Firebase Function to create subscription
     if (!functions) {
       return { success: false, error: 'Firebase functions not available' };
     }
-    
+
     const createSubscriptionFunction = httpsCallable(functions, 'createSubscription');
     const result = await createSubscriptionFunction({
       planId,
       paymentMethodId,
       customerEmail: user.email
     });
-    
-    const { subscriptionId, stripeCustomerId } = result.data as { subscriptionId: string; stripeCustomerId: string };
-    
+
+    const { subscriptionId } = result.data as { subscriptionId: string; stripeCustomerId: string };
+
     // Subscription should be created in Firestore by the Cloud Function
     const subscription = await getUserSubscription(user.uid);
-    
+
     if (!subscription) {
       return { success: false, error: 'Subscription was created but could not be retrieved' };
     }
-    
+
     // Send receipt email
-    if (!functions) {
-      return { success: true, subscription };
+    try {
+      const sendReceiptFunction = httpsCallable(functions, 'sendReceiptEmail');
+      await sendReceiptFunction({
+        email: user.email,
+        purchaseDetails: {
+          amount: selectedPlan.price * 100, // Convert to cents
+          transactionId: subscriptionId,
+          purchaseDate: new Date().toISOString(),
+          productName: selectedPlan.name,
+          description: `Subscription to ${selectedPlan.name} plan`
+        }
+      });
+    } catch (emailError) {
+      // Don't fail the subscription if email fails
+      console.error('Failed to send receipt email:', emailError);
     }
-    
-    const sendReceiptFunction = httpsCallable(functions, 'sendReceiptEmail');
-    await sendReceiptFunction({
-      email: user.email,
-      purchaseDetails: {
-        amount: selectedPlan.price * 100, // Convert to cents
-        transactionId: subscriptionId,
-        purchaseDate: new Date().toISOString(),
-        productName: selectedPlan.name,
-        description: `Subscription to ${selectedPlan.name} plan`
-      }
-    });
-    
+
     return { success: true, subscription };
   } catch (error) {
     console.error('Failed to create subscription:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error occurred while creating subscription' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error occurred while creating subscription'
     };
   }
 }
@@ -269,22 +256,28 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
   }
 }
 
-// Process a payment
+/**
+ * Process a one-time payment
+ *
+ * IMPORTANT: Payment method ID must be obtained from the Stripe SDK on the client side.
+ * Use @stripe/stripe-react-native to collect card details securely.
+ */
 export async function processPayment(
   user: User,
   planId: string,
-  paymentDetails: {
-    cardNumber?: string;
-    expMonth?: number;
-    expYear?: number;
-    cvc?: string;
-    paymentType: 'credit_card' | 'google_pay' | 'apple_pay';
-  }
+  paymentMethodId: string // Must be obtained from Stripe SDK on client
 ): Promise<{
   success: boolean;
   transactionId?: string;
   error?: string;
 }> {
+  if (!paymentMethodId || !paymentMethodId.startsWith('pm_')) {
+    return {
+      success: false,
+      error: 'Invalid payment method. Please use Stripe SDK to create a payment method.'
+    };
+  }
+
   const selectedPlan = subscriptionPlans.find(plan => plan.id === planId);
   if (!selectedPlan) {
     return {
@@ -294,41 +287,13 @@ export async function processPayment(
   }
 
   try {
-    // Create payment method with Stripe
-    let paymentMethodId: string | null = null;
-    
-    if (paymentDetails.paymentType === 'credit_card' && 
-        paymentDetails.cardNumber && 
-        paymentDetails.expMonth && 
-        paymentDetails.expYear && 
-        paymentDetails.cvc) {
-      
-      paymentMethodId = await createPaymentMethod({
-        number: paymentDetails.cardNumber,
-        expMonth: paymentDetails.expMonth,
-        expYear: paymentDetails.expYear,
-        cvc: paymentDetails.cvc
-      });
-    } else {
-      // For Apple Pay / Google Pay, we'd handle that differently
-      // This is a simplified example
-      paymentMethodId = `pm_${Math.random().toString(36).substring(2, 15)}`;
-    }
-    
-    if (!paymentMethodId) {
-      return {
-        success: false,
-        error: 'Failed to create payment method'
-      };
-    }
-    
     if (!functions) {
       return {
         success: false,
         error: 'Firebase functions not available'
       };
     }
-    
+
     // Process the payment using the Cloud Function
     const createPaymentIntentFunction = httpsCallable(functions, 'createPaymentIntent');
     const result = await createPaymentIntentFunction({
@@ -342,7 +307,7 @@ export async function processPayment(
       },
       receiptEmail: user.email
     });
-    
+
     return {
       success: true,
       transactionId: (result.data as any).transactionId,
@@ -353,5 +318,36 @@ export async function processPayment(
       success: false,
       error: error instanceof Error ? error.message : 'Unknown payment error'
     };
+  }
+}
+
+/**
+ * Server-side premium access check
+ * Use this before allowing access to premium-only features
+ * This validates against both Firestore AND Stripe for maximum security
+ */
+export async function checkPremiumAccess(feature?: string): Promise<{
+  hasAccess: boolean;
+  reason?: string;
+  plan?: string;
+  expiresAt?: string;
+}> {
+  try {
+    if (!functions) {
+      return { hasAccess: false, reason: 'functions_unavailable' };
+    }
+
+    const checkPremiumFunction = httpsCallable(functions, 'checkPremiumAccess');
+    const result = await checkPremiumFunction({ feature });
+
+    return result.data as {
+      hasAccess: boolean;
+      reason?: string;
+      plan?: string;
+      expiresAt?: string;
+    };
+  } catch (error) {
+    console.error('Premium access check failed:', error);
+    return { hasAccess: false, reason: 'error' };
   }
 }
