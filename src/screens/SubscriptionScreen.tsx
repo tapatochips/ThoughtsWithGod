@@ -7,10 +7,10 @@ import {
   ScrollView,
   Alert,
   Platform,
-  TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView
+  KeyboardAvoidingView,
 } from 'react-native';
+import { CardField, useStripe } from '@stripe/stripe-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeProvider';
 import { useFirebase } from '../context/FirebaseContext';
@@ -30,17 +30,13 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
   const { theme } = useTheme();
   const { user, refreshPremiumStatus } = useFirebase();
 
+  const { createPaymentMethod } = useStripe();
   const [selectedPlan, setSelectedPlan] = useState(subscriptionPlans[0]);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [currentSubscription, setCurrentSubscription] = useState<any>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
-
-  // Card details
-  const [cardNumber, setCardNumber] = useState('');
-  const [expMonth, setExpMonth] = useState('');
-  const [expYear, setExpYear] = useState('');
-  const [cvc, setCvc] = useState('');
+  const [cardComplete, setCardComplete] = useState(false);
 
   useEffect(() => {
     checkCurrentSubscription();
@@ -59,88 +55,33 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
     }
   };
 
-  const formatCardNumber = (text: string) => {
-    // Remove all non-digits
-    const cleaned = text.replace(/\D/g, '');
-    // Add spaces every 4 digits
-    const chunks = cleaned.match(/.{1,4}/g) || [];
-    return chunks.join(' ').substr(0, 19); // 16 digits + 3 spaces
-  };
-
-  const handleCardNumberChange = (text: string) => {
-    setCardNumber(formatCardNumber(text));
-  };
-
-  const handleExpMonthChange = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    if (cleaned.length <= 2) {
-      setExpMonth(cleaned);
-    }
-  };
-
-  const handleExpYearChange = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    if (cleaned.length <= 2) {
-      setExpYear(cleaned);
-    }
-  };
-
-  const handleCvcChange = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    if (cleaned.length <= 4) {
-      setCvc(cleaned);
-    }
-  };
-
-  const validateCardDetails = () => {
-    const cleanCardNumber = cardNumber.replace(/\s/g, '');
-
-    if (cleanCardNumber.length !== 16) {
-      Alert.alert('Invalid Card', 'Please enter a valid 16-digit card number');
-      return false;
-    }
-
-    const month = parseInt(expMonth);
-    if (month < 1 || month > 12) {
-      Alert.alert('Invalid Expiry', 'Please enter a valid month (01-12)');
-      return false;
-    }
-
-    const year = parseInt('20' + expYear);
-    const currentYear = new Date().getFullYear();
-    if (year < currentYear) {
-      Alert.alert('Invalid Expiry', 'Card has expired');
-      return false;
-    }
-
-    if (cvc.length < 3) {
-      Alert.alert('Invalid CVC', 'Please enter a valid CVC');
-      return false;
-    }
-
-    return true;
-  };
-
   const handleSubscribe = async () => {
     if (!user) {
       Alert.alert('Sign In Required', 'Please sign in to subscribe.');
       return;
     }
 
-    if (!validateCardDetails()) {
+    if (!cardComplete) {
+      Alert.alert('Incomplete Card', 'Please enter your complete card details.');
       return;
     }
 
     setProcessing(true);
 
     try {
-      // For testing, we'll use a mock payment method ID
-      // In production, you'd use Stripe's SDK to tokenize the card
-      const paymentMethodId = 'pm_card_visa'; // Test payment method
+      const { paymentMethod, error: stripeError } = await createPaymentMethod({
+        paymentMethodType: 'Card',
+      });
+
+      if (stripeError || !paymentMethod) {
+        Alert.alert('Card Error', stripeError?.message || 'Could not process card details.');
+        setProcessing(false);
+        return;
+      }
 
       const result = await createSubscription(
         selectedPlan.id,
-        paymentMethodId,
+        paymentMethod.id,
         user.email || ''
       );
 
@@ -296,7 +237,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
           </Text>
 
           <Text style={[styles.subheader, { color: theme.colors.textSecondary }]}>
-            Unlock premium features and support our mission
+            Remove ads, and save unlimited verses. Your support helps us keep the app running and continuously improving!
           </Text>
 
           {/* Plan Selection */}
@@ -362,62 +303,17 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
                 {selectedPlan.name} - ${selectedPlan.price.toFixed(2)}
               </Text>
 
-              <TextInput
-                style={[styles.input, {
+              <CardField
+                postalCodeEnabled={false}
+                style={styles.cardField}
+                cardStyle={{
                   backgroundColor: theme.colors.background,
-                  color: theme.colors.text,
-                  borderColor: theme.colors.border
-                }]}
-                placeholder="Card Number"
-                placeholderTextColor={theme.colors.secondary}
-                value={cardNumber}
-                onChangeText={handleCardNumberChange}
-                keyboardType="numeric"
-                maxLength={19}
-              />
-
-              <View style={styles.row}>
-                <TextInput
-                  style={[styles.input, styles.halfInput, {
-                    backgroundColor: theme.colors.background,
-                    color: theme.colors.text,
-                    borderColor: theme.colors.border
-                  }]}
-                  placeholder="MM"
-                  placeholderTextColor={theme.colors.secondary}
-                  value={expMonth}
-                  onChangeText={handleExpMonthChange}
-                  keyboardType="numeric"
-                  maxLength={2}
-                />
-
-                <TextInput
-                  style={[styles.input, styles.halfInput, {
-                    backgroundColor: theme.colors.background,
-                    color: theme.colors.text,
-                    borderColor: theme.colors.border
-                  }]}
-                  placeholder="YY"
-                  placeholderTextColor={theme.colors.secondary}
-                  value={expYear}
-                  onChangeText={handleExpYearChange}
-                  keyboardType="numeric"
-                  maxLength={2}
-                />
-              </View>
-
-              <TextInput
-                style={[styles.input, {
-                  backgroundColor: theme.colors.background,
-                  color: theme.colors.text,
-                  borderColor: theme.colors.border
-                }]}
-                placeholder="CVC"
-                placeholderTextColor={theme.colors.secondary}
-                value={cvc}
-                onChangeText={handleCvcChange}
-                keyboardType="numeric"
-                maxLength={4}
+                  textColor: theme.colors.text,
+                  borderColor: theme.colors.border,
+                  borderWidth: 1,
+                  borderRadius: 8,
+                }}
+                onCardChange={(details) => setCardComplete(details.complete)}
               />
 
               <View style={styles.buttonRow}>
@@ -557,19 +453,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 20,
   },
-  input: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
+  cardField: {
+    height: 50,
     marginBottom: 16,
-    fontSize: 16,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  halfInput: {
-    width: '48%',
   },
   buttonRow: {
     flexDirection: 'row',

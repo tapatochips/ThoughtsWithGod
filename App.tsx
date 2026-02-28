@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator, AppState, AppStateStatus } from 'react-native';
+import { StripeProvider } from '@stripe/stripe-react-native';
+import { STRIPE_PUBLISHABLE_KEY } from './src/services/payment/stripeService';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
@@ -20,7 +22,7 @@ import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeProvider';
 import { TranslationProvider } from './src/context/TranslationContext';
 import ErrorBoundary from './src/components/common/ErrorBoundary';
-import BannerAd from './src/components/ads/BannerAd';
+// import BannerAd from './src/components/ads/BannerAd'; // TODO: Re-enable when AdMob is set up
 
 // mock notifications
 import { 
@@ -236,7 +238,7 @@ const navigationTheme = {
           )}
         </Stack.Navigator>
       </NavigationContainer>
-      <BannerAd />
+      {/* <BannerAd /> */}{/* TODO: Re-enable when AdMob is set up */}
     </>
   );
 };
@@ -244,13 +246,18 @@ const navigationTheme = {
 const App = () => {
   return (
     <ErrorBoundary>
-      <FirebaseProvider>
-        <ThemeProvider>
-          <TranslationProvider>
-            <AppContent />
-          </TranslationProvider>
-        </ThemeProvider>
-      </FirebaseProvider>
+      <StripeProvider
+        publishableKey={STRIPE_PUBLISHABLE_KEY}
+        merchantIdentifier="merchant.com.yourcompany.thoughtswithgod"
+      >
+        <FirebaseProvider>
+          <ThemeProvider>
+            <TranslationProvider>
+              <AppContent />
+            </TranslationProvider>
+          </ThemeProvider>
+        </FirebaseProvider>
+      </StripeProvider>
     </ErrorBoundary>
   );
 };

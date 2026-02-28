@@ -14,6 +14,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { updateUsername, updateUserPreferences } from '../services/firebase/userProfile';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeProvider';
+import { useTranslation } from '../context/TranslationContext';
 import { Ionicons } from '@expo/vector-icons';
 
 interface ProfileSetupProps {
@@ -23,6 +24,7 @@ interface ProfileSetupProps {
 const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
   const { user, userProfile, refreshUserProfile, isPremiumUser } = useFirebase();
   const { theme, setThemePreference, setFontSizePreference } = useTheme();
+  const { currentTranslation, availableTranslations, setTranslation } = useTranslation();
   const [username, setUsername] = useState('');
   const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark' | 'sepia'>('light');
   const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>('medium');
@@ -202,6 +204,35 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
         </View>
       </View>
       
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Bible Translation</Text>
+        <View style={styles.translationContainer}>
+          {availableTranslations.map((translation) => (
+            <TouchableOpacity
+              key={translation.id}
+              style={[
+                styles.translationOption,
+                {
+                  borderColor: currentTranslation.id === translation.id ? theme.colors.primary : 'transparent',
+                  backgroundColor: currentTranslation.id === translation.id ? `${theme.colors.primary}20` : 'transparent'
+                }
+              ]}
+              onPress={() => setTranslation(translation.id)}
+            >
+              <Text style={[styles.translationAbbreviation, { color: theme.colors.text }]}>
+                {translation.abbreviation}
+              </Text>
+              <Text style={[styles.translationName, { color: theme.colors.textSecondary }]}>
+                {translation.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={[styles.hint, { color: theme.colors.secondary }]}>
+          This changes the Bible translation used throughout the app.
+        </Text>
+      </View>
+
       {/* Premium Features Section with Stripe integration */}
       <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Want to support us?</Text>
@@ -380,6 +411,26 @@ const styles = StyleSheet.create({
   },
   fontPreviewText: {
     lineHeight: 24,
+  },
+  translationContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  translationOption: {
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 2,
+    width: '48%',
+  },
+  translationAbbreviation: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  translationName: {
+    fontSize: 12,
   },
   saveButton: {
     paddingVertical: 14,

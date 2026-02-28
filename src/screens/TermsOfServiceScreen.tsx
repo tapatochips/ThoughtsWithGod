@@ -44,7 +44,7 @@ const TermsOfServiceScreen: React.FC = () => {
 
         <Text style={[styles.subheading, { color: theme.colors.text }]}>3.2 Subscription Terms</Text>
         <Text style={[styles.paragraph, { color: theme.colors.text }]}>
-          • Subscription tiers are offered at $5, $10, and $80 per month{'\n'}
+          • Subscription tiers are offered at $5, $10, $20, and $80 per month{'\n'}
           • Subscriptions automatically renew unless cancelled before the renewal date{'\n'}
           • You may cancel your subscription at any time through your account settings{'\n'}
           • Refunds are handled on a case-by-case basis and are not guaranteed{'\n'}

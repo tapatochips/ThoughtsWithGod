@@ -16,32 +16,28 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourcompany.thoughtswithgod",
-      "config": {
-        "googleMobileAdsAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"
-      }
+      "bundleIdentifier": "com.yourcompany.thoughtswithgod"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.yourcompany.thoughtswithgod",
-      "config": {
-        "googleMobileAdsAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"
-      }
+      "package": "com.yourcompany.thoughtswithgod"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
-        "react-native-google-mobile-ads",
+        "@stripe/stripe-react-native",
         {
-          "androidAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY",
-          "iosAppId": "ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY"
+          "merchantIdentifier": "merchant.com.yourcompany.thoughtswithgod"
         }
-      ]
-    ]
+      ],
+    ],
+    "extra": {
+      "STRIPE_PUBLISHABLE_KEY": "pk_test_your_stripe_publishable_key_here"
+    }
   }
 }

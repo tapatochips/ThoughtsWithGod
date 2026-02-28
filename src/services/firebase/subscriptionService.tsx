@@ -32,29 +32,33 @@ export interface Subscription {
 // Available subscription plans
 export const subscriptionPlans: SubscriptionPlan[] = [
   {
-    id: 'monthly_basic',
-    name: 'Monthly Basic',
+    id: 'monthly_tier1',
+    name: 'Monthly Tier 1',
     description: 'Access to all premium features for 1 month',
-    price: 4.99,
+    price: 5.00,
     features: [
       'Ad-free experience',
       'Unlimited favorite verses',
-      'Personalized daily verses',
-      'Prayer board access'
     ],
     durationMonths: 1
   },
   {
-    id: 'monthly_premium',
-    name: 'Monthly Premium',
-    description: 'Enhanced experience with additional features',
-    price: 9.99,
+    id: 'monthly_tier2',
+    name: 'Monthly Tier 2',
+    description: 'Support the app with a higher tier subscription, thank you!',
+    price: 10.00,
     features: [
       'All Basic features',
-      'Audio Bible readings',
-      'Advanced Bible study tools',
-      'Downloadable content for offline use',
-      'Priority support'
+    ],
+    durationMonths: 1
+  },
+  {
+    id: 'monthly_tier3',
+    name: 'Monthly Tier 3',
+    description: 'Our most generous monthly support tier, thank you so much!',
+    price: 20.00,
+    features: [
+      'All Basic features',
     ],
     durationMonths: 1
   },
@@ -62,12 +66,10 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     id: 'yearly_premium',
     name: 'Yearly Premium',
     description: 'Our best value plan with 2 months free',
-    price: 99.99,
+    price: 80.00,
     features: [
       'All Premium features',
       'Two months free (compared to monthly)',
-      'Early access to new features',
-      'Annual spiritual growth report'
     ],
     durationMonths: 12
   }

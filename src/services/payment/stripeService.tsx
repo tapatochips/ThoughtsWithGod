@@ -24,10 +24,10 @@ export const STRIPE_PUBLISHABLE_KEY = Constants.expoConfig?.extra?.STRIPE_PUBLIS
 // Available subscription plans
 export const subscriptionPlans: SubscriptionPlan[] = [
     {
-        id: 'monthly_basic',
-        name: 'Monthly Basic',
+        id: 'monthly_tier1',
+        name: 'Monthly Tier 1',
         description: 'Want to support us?',
-        price: 4.99,
+        price: 5.00,
         priceId: 'price_basic_monthly', // Update with your actual Stripe Price ID
         features: [
             'This plan helps keep the app running!'
@@ -35,13 +35,24 @@ export const subscriptionPlans: SubscriptionPlan[] = [
         durationMonths: 1
     },
     {
-        id: 'monthly_premium',
-        name: 'Monthly Premium',
-        description: 'Enhanced experience with additional features',
-        price: 9.99,
+        id: 'monthly_tier2',
+        name: 'Monthly Tier 2',
+        description: 'Support the app with a higher tier subscription, thank you!',
+        price: 10.00,
         priceId: 'price_premium_monthly', // Update with your actual Stripe Price ID
         features: [
             'Want to support us more? Choose this plan!',
+        ],
+        durationMonths: 1
+    },
+    {
+        id: 'monthly_tier3',
+        name: 'Monthly Tier 3',
+        description: 'Our most generous monthly support tier, thank you so much!',
+        price: 20.00,
+        priceId: 'price_premium_monthly_2', // Update with your actual Stripe Price ID
+        features: [
+            'Want to support us even more? Choose this plan!',
         ],
         durationMonths: 1
     },

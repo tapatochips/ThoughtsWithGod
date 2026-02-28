@@ -299,11 +299,13 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
                                     </Text>
                                 </TouchableOpacity>
                                 
-                                <TouchableOpacity 
-                                    style={[styles.navButton, { 
+                            </View>
+                            <View style={styles.readBibleContainer}>
+                                <TouchableOpacity
+                                    style={[styles.navButton, {
                                         backgroundColor: theme.colors.surface,
                                         ...getShadowStyle(theme)
-                                    }]} 
+                                    }]}
                                     onPress={() => navigation.navigate('BibleReader')}
                                 >
                                     <Ionicons name="library-outline" size={20} color={theme.colors.primary} />
@@ -472,6 +474,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         justifyContent: 'space-between',
+        width: '100%',
+        marginBottom: 8,
+    },
+    readBibleContainer: {
+        alignItems: 'center',
         width: '100%',
         marginBottom: 16,
     },
