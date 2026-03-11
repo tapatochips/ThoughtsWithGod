@@ -6,6 +6,8 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../services/firebase/firebaseFunctions';
 
 const FirebaseTest: React.FC = () => {
+    if (!__DEV__) return null;
+
     const { db, user, auth } = useFirebase();
     const [testResults, setTestResults] = useState<{
         auth: boolean;

@@ -47,7 +47,7 @@ const FirebaseContext = createContext<FirebaseContextType>({
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
-  console.log("FirebaseProvider rendered");
+  if (__DEV__) console.log("FirebaseProvider rendered");
   const [user, setUser] = useState<User | null>(firebaseInstance.auth?.currentUser || null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,20 +109,21 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
   // Set up auth state listener
   useEffect(() => {
     if (!firebaseInstance.auth) {
-      console.log("Auth not initialized in FirebaseProvider");
+      if (__DEV__) console.log("Auth not initialized in FirebaseProvider");
       setIsLoading(false);
       return;
     }
 
-    console.log("Setting up auth state listener");
+    if (__DEV__) console.log("Setting up auth state listener");
     const unsubscribe = onAuthStateChanged(firebaseInstance.auth, (firebaseUser) => {
-      console.log("Auth state changed:", firebaseUser?.email);
+      // Do not log the user's email — it would appear in crash reports and device logs.
+      if (__DEV__) console.log("Auth state changed:", firebaseUser ? "signed in" : "signed out");
       setUser(firebaseUser);
     });
 
     // Clean up listener on unmount
     return () => {
-      console.log("Cleaning up auth state listener");
+      if (__DEV__) console.log("Cleaning up auth state listener");
       unsubscribe();
     };
   }, [firebaseInstance.auth]);

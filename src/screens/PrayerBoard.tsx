@@ -23,12 +23,16 @@ import {
   doc,
   deleteDoc,
   updateDoc,
+  setDoc,
+  writeBatch,
   query,
   orderBy,
   Timestamp,
+  serverTimestamp,
   arrayUnion,
   arrayRemove,
-  getDocs
+  getDocs,
+  increment
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -66,6 +70,7 @@ const PrayerBoard: React.FC = () => {
   const [selectedPrayer, setSelectedPrayer] = useState<PrayerRequest | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
+  const [ownedPrayerIds, setOwnedPrayerIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!db || !user) {
@@ -95,6 +100,30 @@ const PrayerBoard: React.FC = () => {
       (error) => {
         console.error("Error fetching prayer requests:", error);
         setLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [db, user]);
+
+  // Subscribe to the private ownership subcollection so we can show owner controls
+  // on anonymous prayers the current user created without exposing userId publicly.
+  useEffect(() => {
+    if (!db || !user) {
+      setOwnedPrayerIds(new Set());
+      return;
+    }
+
+    const ownedCollection = collection(db, `users/${user.uid}/ownedPrayers`);
+    const unsubscribe = onSnapshot(
+      ownedCollection,
+      (snapshot) => {
+        const ids = new Set<string>();
+        snapshot.forEach((d) => ids.add(d.id));
+        setOwnedPrayerIds(ids);
+      },
+      (error) => {
+        console.error('Error fetching owned prayers:', error);
       }
     );
 
@@ -145,17 +174,36 @@ const PrayerBoard: React.FC = () => {
     setSubmitting(true);
 
     try {
-      const prayersCollection = collection(db, 'prayers');
-      await addDoc(prayersCollection, {
+      const batch = writeBatch(db);
+
+      // Pre-generate the prayer document reference so we can reference its ID
+      const prayerRef = doc(collection(db, 'prayers'));
+      batch.set(prayerRef, {
         text: validation.sanitized,
-        userId: user.uid,
-        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
+        // For anonymous posts userId and username are omitted from the public document
+        // to prevent de-anonymisation via direct Firestore reads.
+        userId: isAnonymous ? null : user.uid,
+        username: isAnonymous ? 'Anonymous' : (userProfile?.username || `User_${user.uid.substring(0, 5)}`),
         createdAt: Timestamp.now(),
         answered: false,
         likedBy: [],
         commentCount: 0,
         isAnonymous: isAnonymous
       });
+
+      // Update rate limit atomically with the prayer creation.
+      // The Firestore rule only allows setting lastActionAt to request.time,
+      // preventing a user from writing a past timestamp to reset their own limit.
+      const rateLimitRef = doc(db, `rateLimits/${user.uid}`);
+      batch.set(rateLimitRef, { lastActionAt: serverTimestamp() });
+
+      await batch.commit();
+
+      if (isAnonymous) {
+        // Record ownership privately so the current user can still edit/delete their post
+        const ownerDoc = doc(db, `users/${user.uid}/ownedPrayers`, prayerRef.id);
+        await setDoc(ownerDoc, { prayerId: prayerRef.id, createdAt: Timestamp.now() });
+      }
 
       setNewPrayer('');
       setIsAnonymous(false);
@@ -179,11 +227,11 @@ const PrayerBoard: React.FC = () => {
     }
   };
 
-  const handleDeletePrayer = async (prayerId: string, prayerUserId: string) => {
+  const handleDeletePrayer = async (prayer: PrayerRequest) => {
     if (!user || !db) return;
-    
-    // Only allow deletion if the current user created the prayer request
-    if (user.uid !== prayerUserId) {
+
+    const canDelete = prayer.userId === user.uid || ownedPrayerIds.has(prayer.id);
+    if (!canDelete) {
       Alert.alert("Permission Denied", "You can only delete your own prayer requests.");
       return;
     }
@@ -193,22 +241,28 @@ const PrayerBoard: React.FC = () => {
       "Are you sure you want to delete this prayer request? This will also delete all comments.",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive", 
+        {
+          text: "Delete",
+          style: "destructive",
           onPress: async () => {
             try {
               // First delete all comments
-              const commentsCollection = collection(db, `prayers/${prayerId}/comments`);
+              const commentsCollection = collection(db, `prayers/${prayer.id}/comments`);
               const commentsSnapshot = await getDocs(commentsCollection);
-              const deletePromises = commentsSnapshot.docs.map(commentDoc => 
-                deleteDoc(doc(db, `prayers/${prayerId}/comments`, commentDoc.id))
+              const deletePromises = commentsSnapshot.docs.map(commentDoc =>
+                deleteDoc(doc(db, `prayers/${prayer.id}/comments`, commentDoc.id))
               );
               await Promise.all(deletePromises);
-              
+
               // Then delete the prayer request
-              const prayerDoc = doc(db, 'prayers', prayerId);
+              const prayerDoc = doc(db, 'prayers', prayer.id);
               await deleteDoc(prayerDoc);
+
+              // Clean up the private ownership record for anonymous prayers
+              if (prayer.isAnonymous) {
+                const ownerDoc = doc(db, `users/${user.uid}/ownedPrayers`, prayer.id);
+                await deleteDoc(ownerDoc);
+              }
             } catch (error) {
               console.error("Error deleting prayer request:", error);
               Alert.alert("Error", "Failed to delete prayer request. Please try again.");
@@ -272,10 +326,10 @@ const PrayerBoard: React.FC = () => {
         createdAt: Timestamp.now()
       });
 
-      // Update comment count on the prayer document
+      // Update comment count atomically to avoid race conditions under concurrent use
       const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
       await updateDoc(prayerDoc, {
-        commentCount: (selectedPrayer.commentCount || 0) + 1
+        commentCount: increment(1)
       });
 
       setNewComment('');
@@ -300,10 +354,10 @@ const PrayerBoard: React.FC = () => {
       const commentDoc = doc(db, `prayers/${selectedPrayer.id}/comments`, commentId);
       await deleteDoc(commentDoc);
       
-      // Update comment count on the prayer document
+      // Update comment count atomically
       const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
       await updateDoc(prayerDoc, {
-        commentCount: Math.max((selectedPrayer.commentCount || 0) - 1, 0)
+        commentCount: increment(-1)
       });
     } catch (error) {
       console.error("Error deleting comment:", error);
@@ -496,35 +550,35 @@ const PrayerBoard: React.FC = () => {
                 </TouchableOpacity>
               </View>
               
-              {user.uid === item.userId && (
+              {(item.userId === user.uid || ownedPrayerIds.has(item.id)) && (
                 <View style={[styles.ownerActions, { borderTopColor: theme.colors.divider }]}>
                   <TouchableOpacity
                     style={[styles.ownerActionButton, { backgroundColor: theme.colors.surface }]}
                     onPress={() => handleToggleAnswered(item.id, item.answered)}
                   >
-                    <Ionicons 
-                      name={item.answered ? "close-circle-outline" : "checkmark-circle-outline"} 
-                      size={18} 
-                      color={item.answered ? theme.colors.danger : theme.colors.success} 
+                    <Ionicons
+                      name={item.answered ? "close-circle-outline" : "checkmark-circle-outline"}
+                      size={18}
+                      color={item.answered ? theme.colors.danger : theme.colors.success}
                     />
                     <Text style={[
-                      styles.ownerActionText, 
-                      { 
-                        color: item.answered ? theme.colors.danger : theme.colors.success 
+                      styles.ownerActionText,
+                      {
+                        color: item.answered ? theme.colors.danger : theme.colors.success
                       }
                     ]}>
                       {item.answered ? "Mark Unanswered" : "Mark Answered"}
                     </Text>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={[styles.ownerActionButton, { backgroundColor: `${theme.colors.danger}15` }]}
-                    onPress={() => handleDeletePrayer(item.id, item.userId)}
+                    onPress={() => handleDeletePrayer(item)}
                   >
-                    <Ionicons 
-                      name="trash-outline" 
-                      size={18} 
-                      color={theme.colors.danger} 
+                    <Ionicons
+                      name="trash-outline"
+                      size={18}
+                      color={theme.colors.danger}
                     />
                     <Text style={[styles.ownerActionText, { color: theme.colors.danger }]}>
                       Delete

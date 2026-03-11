@@ -37,7 +37,41 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ navigation }) => {
                 console.log("User signed in successfully.");
             }
         } catch (err) {
-            const errorMessage =(err as Error).message || (isSignUp ? "Failed to create user" : "Failed to sign in");
+            const code = (err as { code?: string }).code ?? '';
+            let errorMessage: string;
+
+            if (isSignUp) {
+                switch (code) {
+                    case 'auth/email-already-in-use':
+                        errorMessage = 'An account already exists. Try signing in instead.';
+                        break;
+                    case 'auth/invalid-email':
+                        errorMessage = 'Please enter a valid email address.';
+                        break;
+                    case 'auth/weak-password':
+                        errorMessage = 'Password must be at least 6 characters.';
+                        break;
+                    default:
+                        errorMessage = 'Failed to create account. Please try again.';
+                }
+            } else {
+                switch (code) {
+                    case 'auth/user-not-found':
+                    case 'auth/wrong-password':
+                    case 'auth/invalid-credential':
+                        errorMessage = 'Invalid email or password. Please try again.';
+                        break;
+                    case 'auth/invalid-email':
+                        errorMessage = 'Please enter a valid email address.';
+                        break;
+                    case 'auth/too-many-requests':
+                        errorMessage = 'Too many attempts. Please try again later.';
+                        break;
+                    default:
+                        errorMessage = 'Sign in failed. Please try again.';
+                }
+            }
+
             setError(errorMessage);
             console.error(isSignUp ? "Failed to create user:" : "Failed to sign in:", err);
         } finally {

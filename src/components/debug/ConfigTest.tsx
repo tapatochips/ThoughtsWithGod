@@ -8,6 +8,8 @@ import Constants from 'expo-constants';
  * NOTE: Remove this in production or add authentication to prevent exposing config
  */
 const ConfigTest: React.FC = () => {
+  if (!__DEV__) return null;
+
   const extra = Constants.expoConfig?.extra || {};
   
   // Filter out any sensitive keys that should not be shown 

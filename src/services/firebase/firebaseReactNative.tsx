@@ -2,7 +2,7 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 
-console.log("firebaseReactNative.tsx: Start");
+if (__DEV__) console.log("firebaseReactNative.tsx: Start");
 
 // Firebase configuration object - using environment variables for security
 const firebaseConfig = {
@@ -25,19 +25,19 @@ export const firebaseInstance = {
 
 // Initialize Firebase App
 try {
-  console.log("Initializing Firebase app...");
+  if (__DEV__) console.log("Initializing Firebase app...");
   firebaseInstance.app = initializeApp(firebaseConfig);
-  console.log("Firebase app initialized:", firebaseInstance.app);
+  if (__DEV__) console.log("Firebase app initialized");
 } catch (error) {
   console.error("Error initializing Firebase app:", error);
 }
 
 // Initialize Auth
 if (firebaseInstance.app) {
-  console.log("firebaseInstance.app is initialized");
+  if (__DEV__) console.log("firebaseInstance.app is initialized");
   try {
     firebaseInstance.auth = getAuth(firebaseInstance.app);
-    console.log("Auth initialized:", firebaseInstance.auth);
+    if (__DEV__) console.log("Auth initialized");
   } catch (error) {
     console.error("Error initializing auth:", error);
   }
@@ -49,13 +49,13 @@ if (firebaseInstance.app) {
 if (firebaseInstance.app) {
   try {
     firebaseInstance.db = getFirestore(firebaseInstance.app);
-    console.log("Firestore initialized:", firebaseInstance.db);
+    if (__DEV__) console.log("Firestore initialized");
   } catch (error) {
     console.error("Error initializing Firestore:", error);
   }
 }
 
-console.log("firebaseReactNative.tsx: End");
+if (__DEV__) console.log("firebaseReactNative.tsx: End");
 
 // Export individual services for convenience
 export const app: FirebaseApp | null = firebaseInstance.app;

@@ -23,12 +23,15 @@ import {
   doc,
   deleteDoc,
   updateDoc,
+  writeBatch,
   query,
   orderBy,
   Timestamp,
+  serverTimestamp,
   arrayUnion,
   arrayRemove,
-  getDocs
+  getDocs,
+  increment
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -143,8 +146,10 @@ const BiblicalDiscussions: React.FC = () => {
     setSubmitting(true);
 
     try {
-      const discussionsCollection = collection(db, 'biblical-discussions');
-      await addDoc(discussionsCollection, {
+      const batch = writeBatch(db);
+
+      const discussionRef = doc(collection(db, 'biblical-discussions'));
+      batch.set(discussionRef, {
         text: validation.sanitized,
         userId: user.uid,
         username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
@@ -152,6 +157,12 @@ const BiblicalDiscussions: React.FC = () => {
         likedBy: [],
         commentCount: 0
       });
+
+      // Update rate limit atomically with the discussion creation
+      const rateLimitRef = doc(db, `rateLimits/${user.uid}`);
+      batch.set(rateLimitRef, { lastActionAt: serverTimestamp() });
+
+      await batch.commit();
 
       setNewDiscussion('');
     } catch (error) {
@@ -254,10 +265,10 @@ const BiblicalDiscussions: React.FC = () => {
         createdAt: Timestamp.now()
       });
 
-      // Update comment count on the discussion document
+      // Update comment count atomically to avoid race conditions under concurrent use
       const discussionDoc = doc(db, 'biblical-discussions', selectedDiscussion.id);
       await updateDoc(discussionDoc, {
-        commentCount: (selectedDiscussion.commentCount || 0) + 1
+        commentCount: increment(1)
       });
 
       setNewComment('');
@@ -282,10 +293,10 @@ const BiblicalDiscussions: React.FC = () => {
       const commentDoc = doc(db, `biblical-discussions/${selectedDiscussion.id}/comments`, commentId);
       await deleteDoc(commentDoc);
       
-      // Update comment count on the discussion document
+      // Update comment count atomically
       const discussionDoc = doc(db, 'biblical-discussions', selectedDiscussion.id);
       await updateDoc(discussionDoc, {
-        commentCount: Math.max((selectedDiscussion.commentCount || 0) - 1, 0)
+        commentCount: increment(-1)
       });
     } catch (error) {
       console.error("Error deleting comment:", error);

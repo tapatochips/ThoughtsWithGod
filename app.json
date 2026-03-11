@@ -16,14 +16,14 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.yourcompany.thoughtswithgod"
+      "bundleIdentifier": "com.tapatochips LLC.thoughtswithgod"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.yourcompany.thoughtswithgod"
+      "package": "com.tapatochips LLC.thoughtswithgod"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -36,8 +36,5 @@
         }
       ],
     ],
-    "extra": {
-      "STRIPE_PUBLISHABLE_KEY": "pk_test_your_stripe_publishable_key_here"
-    }
   }
 }

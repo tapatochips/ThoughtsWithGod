@@ -1,18 +1,18 @@
 {
     "compilerOptions": {
-      "target": "es2017",
-      "module": "commonjs",
-      "strict": true,
-      "esModuleInterop": true,
-      "skipLibCheck": true,
-      "forceConsistentCasingInFileNames": true,
-      "outDir": "lib"
+        "target": "es2017",
+        "module": "commonjs",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "outDir": "lib"
     },
     "include": [
-      "src"
+        "index.tsx"
     ],
-    "scripts": {
-  "build": "tsc",
-  "deploy": "firebase deploy --only functions"
+    "exclude": [
+        "lib",
+        "node_modules"
+    ]
 }
-  }

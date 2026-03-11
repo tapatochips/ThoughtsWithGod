@@ -14,6 +14,12 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Check if the current user owns an anonymous prayer via the private ownership subcollection
+    function isAnonymousPrayerOwner(prayerId) {
+      return isAuthenticated() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)/ownedPrayers/$(prayerId));
+    }
+
     // Validate string length
     function isValidLength(str, minLen, maxLen) {
       return str is string && str.size() >= minLen && str.size() <= maxLen;
@@ -37,9 +43,16 @@ service cloud.firestore {
     // =================== RATE LIMITS COLLECTION ===================
 
     // Rate limits tracking (internal use)
+    // - Read is intentionally denied to the client to prevent bypass via cached reads.
+    // - Write is allowed only to set lastActionAt to the current server request time,
+    //   preventing a user from writing a past timestamp to reset their own limit.
+    // - Delete is denied so users cannot wipe their rate-limit record.
     match /rateLimits/{userId} {
-      allow read: if isOwner(userId);
-      allow write: if isOwner(userId);
+      allow read: if false;
+      allow create, update: if isOwner(userId) &&
+                               request.resource.data.keys().hasOnly(['lastActionAt']) &&
+                               request.resource.data.lastActionAt == request.time;
+      allow delete: if false;
     }
 
     // =================== USER DATA ===================
@@ -62,23 +75,29 @@ service cloud.firestore {
       match /favoriteVerses/{verseId} {
         allow read, write: if isOwner(userId);
       }
+
+      // Private ownership records for anonymous prayers - only the owner can read/write
+      // This lets rules verify ownership without exposing userId in the prayer document itself
+      match /ownedPrayers/{prayerId} {
+        allow read: if isOwner(userId);
+        // Only allow creating an ownership record for a prayer that is actually anonymous
+        allow create: if isOwner(userId) &&
+                        get(/databases/$(database)/documents/prayers/$(prayerId)).data.isAnonymous == true &&
+                        get(/databases/$(database)/documents/prayers/$(prayerId)).data.userId == null;
+        allow delete: if isOwner(userId);
+      }
     }
 
     // =================== USER PROFILES ===================
 
     // User profiles for settings and preferences
     match /userProfiles/{userId} {
-      // Read rules: Restrict what data can be read
-      // Own profile: full access
-      // Other profiles: only allow reading specific public fields
+      // Only the owner may read their own profile. Firestore does not support
+      // field-level read restrictions, so cross-user reads are intentionally
+      // denied to prevent leaking email, isPremium, premiumExpiry, etc.
+      // Usernames needed by other screens are stored directly on prayer/discussion
+      // documents, so no cross-user profile lookup is required.
       allow read: if isOwner(userId);
-
-      // Other users can only read public profile info via a limited query
-      // They can read the document but sensitive fields should not be stored here
-      // or use field-level security in your app logic
-      allow read: if isAuthenticated() &&
-                    // Only allow reading if accessing for username lookup
-                    resource.data.keys().hasAny(['username', 'userId']);
 
       // Only the user can write to their own profile
       allow create: if isOwner(userId) &&
@@ -112,21 +131,31 @@ service cloud.firestore {
 
       // Creation with validation
       allow create: if isAuthenticated() &&
-                      request.resource.data.userId == request.auth.uid &&
+                      canPerformAction(request.auth.uid) &&
                       // Validate required fields
                       request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
                       // Validate content length (max 2000 chars)
                       isValidContent(request.resource.data.text, 2000) &&
-                      // Validate username
-                      isValidLength(request.resource.data.username, 1, 30) &&
                       // Ensure likedBy starts empty
                       request.resource.data.likedBy == [] &&
                       // Ensure commentCount starts at 0
-                      request.resource.data.commentCount == 0;
+                      request.resource.data.commentCount == 0 &&
+                      (
+                        // Non-anonymous: userId must match auth, username validated normally
+                        (request.resource.data.get('isAnonymous', false) == false &&
+                         request.resource.data.userId == request.auth.uid &&
+                         isValidLength(request.resource.data.username, 1, 30)) ||
+                        // Anonymous: userId must be null, username must be 'Anonymous'
+                        (request.resource.data.isAnonymous == true &&
+                         request.resource.data.userId == null &&
+                         request.resource.data.username == 'Anonymous')
+                      );
 
       // Owner can update their own prayers (except likedBy/commentCount which have special rules)
       allow update: if isAuthenticated() &&
-                      resource.data.userId == request.auth.uid &&
+                      // Non-anonymous owner -or- anonymous prayer owner (verified via private subcollection)
+                      (resource.data.userId == request.auth.uid ||
+                       (resource.data.get('isAnonymous', false) == true && isAnonymousPrayerOwner(prayerId))) &&
                       // Prevent changing userId
                       request.resource.data.userId == resource.data.userId &&
                       // Validate text if being updated
@@ -135,14 +164,20 @@ service cloud.firestore {
 
       // Owner can delete their own prayers
       allow delete: if isAuthenticated() &&
-                      resource.data.userId == request.auth.uid;
+                      (resource.data.userId == request.auth.uid ||
+                       (resource.data.get('isAnonymous', false) == true && isAnonymousPrayerOwner(prayerId)));
 
-      // Special case for liking prayers - any user can update if only modifying allowed fields
+      // Special case for liking prayers - only likedBy may change; user can only add/remove themselves
       allow update: if isAuthenticated() &&
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']) &&
-                      // Prevent manipulation - user can only add/remove themselves from likedBy
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy']) &&
                       (request.resource.data.likedBy.toSet().difference(resource.data.likedBy.toSet()).size() <= 1) &&
                       (resource.data.likedBy.toSet().difference(request.resource.data.likedBy.toSet()).size() <= 1);
+
+      // commentCount may only be incremented or decremented by exactly 1 (e.g. when adding/removing a comment)
+      allow update: if isAuthenticated() &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']) &&
+                      (request.resource.data.commentCount == resource.data.commentCount + 1 ||
+                       request.resource.data.commentCount == resource.data.commentCount - 1);
 
       // Comments subcollection
       match /comments/{commentId} {
@@ -179,6 +214,7 @@ service cloud.firestore {
 
       // Creation with validation
       allow create: if isAuthenticated() &&
+                      canPerformAction(request.auth.uid) &&
                       request.resource.data.userId == request.auth.uid &&
                       // Validate required fields
                       request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
@@ -203,12 +239,17 @@ service cloud.firestore {
       allow delete: if isAuthenticated() &&
                       resource.data.userId == request.auth.uid;
 
-      // Special case for liking discussions - any user can update if only modifying allowed fields
+      // Special case for liking discussions - only likedBy may change; user can only add/remove themselves
       allow update: if isAuthenticated() &&
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy', 'commentCount']) &&
-                      // Prevent manipulation - user can only add/remove themselves from likedBy
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy']) &&
                       (request.resource.data.likedBy.toSet().difference(resource.data.likedBy.toSet()).size() <= 1) &&
                       (resource.data.likedBy.toSet().difference(request.resource.data.likedBy.toSet()).size() <= 1);
+
+      // commentCount may only be incremented or decremented by exactly 1
+      allow update: if isAuthenticated() &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']) &&
+                      (request.resource.data.commentCount == resource.data.commentCount + 1 ||
+                       request.resource.data.commentCount == resource.data.commentCount - 1);
 
       // Comments subcollection
       match /comments/{commentId} {

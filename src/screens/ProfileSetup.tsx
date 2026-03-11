@@ -16,6 +16,10 @@ import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeProvider';
 import { useTranslation } from '../context/TranslationContext';
 import { Ionicons } from '@expo/vector-icons';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../services/firebase/firebaseFunctions';
+import { signOut } from 'firebase/auth';
+import { auth } from '../services/firebase/firebaseReactNative';
 
 interface ProfileSetupProps {
   navigation: NavigationProp<ParamListBase>;
@@ -29,6 +33,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
   const [selectedTheme, setSelectedTheme] = useState<'light' | 'dark' | 'sepia'>('light');
   const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>('medium');
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (userProfile) {
@@ -64,6 +69,35 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will permanently delete your account, all your data, prayer requests, and cancel any active subscription. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Account',
+          style: 'destructive',
+          onPress: async () => {
+            if (!user || !functions || !auth) return;
+            setIsDeleting(true);
+            try {
+              const deleteAccountFn = httpsCallable(functions, 'deleteAccount');
+              await deleteAccountFn({});
+              // Auth account is deleted server-side; sign out the local session
+              await signOut(auth);
+            } catch (error) {
+              console.error('Error deleting account:', error);
+              Alert.alert('Error', 'Failed to delete account. Please try again or contact support@thoughtswithgod.com.');
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Handle theme selection with immediate update
@@ -268,6 +302,14 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
       <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
         <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Legal</Text>
         <TouchableOpacity
+          style={[styles.legalButton, { borderColor: theme.colors.border, marginBottom: 10 }]}
+          onPress={() => navigation.navigate('PrivacyPolicy')}
+        >
+          <Ionicons name="shield-outline" size={20} color={theme.colors.text} />
+          <Text style={[styles.legalButtonText, { color: theme.colors.text }]}>Privacy Policy</Text>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.legalButton, { borderColor: theme.colors.border }]}
           onPress={() => navigation.navigate('TermsOfService')}
         >
@@ -277,6 +319,24 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
           </Text>
           <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
         </TouchableOpacity>
+      </View>
+
+      {/* Account Deletion — required by App Store and Google Play */}
+      <View style={[styles.section, { backgroundColor: theme.colors.card, borderColor: theme.colors.border, ...getShadowStyle(theme) }]}>
+        <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Account</Text>
+        <TouchableOpacity
+          style={[styles.legalButton, { borderColor: theme.colors.danger || '#FF3B30' }]}
+          onPress={handleDeleteAccount}
+          disabled={isDeleting}
+        >
+          <Ionicons name="trash-outline" size={20} color={theme.colors.danger || '#FF3B30'} />
+          <Text style={[styles.legalButtonText, { color: theme.colors.danger || '#FF3B30' }]}>
+            {isDeleting ? 'Deleting Account…' : 'Delete Account'}
+          </Text>
+        </TouchableOpacity>
+        <Text style={[styles.hint, { color: theme.colors.textSecondary, marginTop: 8 }]}>
+          Permanently deletes your account, all data, and cancels any active subscription.
+        </Text>
       </View>
 
       <TouchableOpacity

@@ -16,6 +16,7 @@ import SubscriptionScreen from './src/screens/SubscriptionScreen';
 import ReceiptViewer from './src/screens/ReceiptViewer';
 import BibleReader from './src/screens/BibleReader';
 import TermsOfServiceScreen from './src/screens/TermsOfServiceScreen';
+import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
 
 // providers
 import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
@@ -25,12 +26,11 @@ import ErrorBoundary from './src/components/common/ErrorBoundary';
 // import BannerAd from './src/components/ads/BannerAd'; // TODO: Re-enable when AdMob is set up
 
 // mock notifications
-import { 
-  registerForPushNotificationsAsync, 
+import {
+  registerForPushNotificationsAsync,
   scheduleDailyVerseReminder,
   setupNotificationListener,
   setupNotificationResponseListener,
-  cancelAllScheduledNotifications
 } from './src/services/notifications';
 
 const Stack = createStackNavigator();
@@ -48,16 +48,16 @@ const AppContent = () => {
     if (user) {
       // register for notifications
       registerForPushNotificationsAsync().then(token => {
-        console.log('Push token:', token);
+        if (__DEV__) console.log('Push token:', token);
       });
 
       // set up notification listeners
       notificationListener.current = setupNotificationListener(notification => {
-        console.log('Notification received:', notification);
+        if (__DEV__) console.log('Notification received:', notification);
       });
 
       responseListener.current = setupNotificationResponseListener(response => {
-        console.log('Notification response received:', response);
+        if (__DEV__) console.log('Notification response received:', response);
         // handle nav if needed based on notification content
       });
 
@@ -81,14 +81,12 @@ const AppContent = () => {
     const subscription = AppState.addEventListener("change", (nextAppState: AppStateStatus) => {
       if (
         appState.current.match(/inactive|background/) &&
-        nextAppState === "active" && 
+        nextAppState === "active" &&
         user
       ) {
-        console.log("App has come to the foreground!");
         //re-schedule notifications when app comes to foreground
         scheduleDailyVerseReminder(user.uid);
       }
-
       appState.current = nextAppState;
     });
 
@@ -99,14 +97,10 @@ const AppContent = () => {
 
   //firebase initialization check
   useEffect(() => {
-    if (firebaseInstance.isAppInitialized()) {
-      console.log("Firebase initialized successfully");
-    } else {
-      console.log("Waiting for Firebase to initialize...");
+    if (!firebaseInstance.isAppInitialized()) {
       const timeoutId = setTimeout(() => {
         setError("Firebase initialization timeout");
       }, 10000);
-      
       return () => clearTimeout(timeoutId);
     }
   }, [firebaseInstance]);
@@ -221,6 +215,11 @@ const navigationTheme = {
                 component={TermsOfServiceScreen}
                 options={{ title: "Terms of Service" }}
               />
+              <Stack.Screen
+                name="PrivacyPolicy"
+                component={PrivacyPolicyScreen}
+                options={{ title: "Privacy Policy" }}
+              />
             </>
           ) : (
             <>
@@ -233,6 +232,11 @@ const navigationTheme = {
                 name="TermsOfService"
                 component={TermsOfServiceScreen}
                 options={{ title: "Terms of Service" }}
+              />
+              <Stack.Screen
+                name="PrivacyPolicy"
+                component={PrivacyPolicyScreen}
+                options={{ title: "Privacy Policy" }}
               />
             </>
           )}

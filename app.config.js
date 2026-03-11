@@ -15,6 +15,7 @@ const getEnvironment = () => {
 };
 
 module.exports = {
+  owner: "tapatochips",
   name: "ThoughtsWithGod",
   slug: "ThoughtsWithGod",
   version: "1.0.0",
@@ -41,6 +42,11 @@ module.exports = {
   web: {
     favicon: "./assets/favicon.png"
   },
-  extra: getEnvironment()
+  extra: {
+    ...getEnvironment(),
+    eas: {
+      projectId: "75d9cf7e-a5f6-4fda-b527-98b0c73529d6"
+    }
+  }
   // No plugins needed
 };
