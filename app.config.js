@@ -18,7 +18,7 @@ module.exports = {
   owner: "tapatochips",
   name: "ThoughtsWithGod",
   slug: "ThoughtsWithGod",
-  version: "1.0.0",
+  version: "1.0.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
@@ -30,23 +30,31 @@ module.exports = {
   },
   ios: {
     supportsTablet: true,
-    bundleIdentifier: "com.yourdomain.thoughtswithgod"
+    bundleIdentifier: "com.tapatochips.thoughtswithgod"
   },
   android: {
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#ffffff"
     },
-    package: "com.yourdomain.thoughtswithgod"
+    package: "com.tapatochips.thoughtswithgod",
+    versionCode: 2
   },
   web: {
     favicon: "./assets/favicon.png"
   },
+  plugins: [
+    [
+      "@stripe/stripe-react-native",
+      {
+        "merchantIdentifier": "merchant.com.tapatochips.thoughtswithgod"
+      }
+    ]
+  ],
   extra: {
     ...getEnvironment(),
     eas: {
       projectId: "75d9cf7e-a5f6-4fda-b527-98b0c73529d6"
     }
   }
-  // No plugins needed
 };

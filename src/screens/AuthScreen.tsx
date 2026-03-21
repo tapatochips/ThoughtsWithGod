@@ -22,6 +22,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ navigation }) => {
     const handleAuthentication = async () => {
         if (!auth) {
             console.log("Auth is not initialized yet.");
+            setError("Authentication service unavailable. Please restart the app.");
             return;
         }
 
