@@ -97,8 +97,15 @@ exports.createSubscription = (0, https_1.onCall)({
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'Must be logged in to create subscription');
     }
-    const { planId, paymentMethodId, customerEmail } = request.data;
+    const { planId, paymentMethodId } = request.data;
     const userId = request.auth.uid;
+    // Use the email from the verified auth token — never trust a client-
+    // supplied email, which could attach someone else's address to the
+    // Stripe customer (receipts, invoices) or be spoofed entirely.
+    const customerEmail = request.auth.token.email;
+    if (!customerEmail) {
+        throw new https_1.HttpsError('invalid-argument', 'No verified email address on file for this account');
+    }
     try {
         // Plan mapping — price IDs are stored as Cloud Function secrets so they
         // are never hard-coded in source and cannot be changed without a deploy.
@@ -145,9 +152,13 @@ exports.createSubscription = (0, https_1.onCall)({
             expand: ['latest_invoice.payment_intent'],
             metadata: { userId, planId },
         });
-        // Calculate end date
-        const endDate = new Date();
-        endDate.setMonth(endDate.getMonth() + (planId.includes('yearly') ? 12 : 1));
+        // Use Stripe's actual billing period end as the source of truth
+        // instead of computing it locally with setMonth() — local math can
+        // disagree with Stripe (billing anchors, trials, proration).
+        // current_period_end was removed from Stripe's TS types in API
+        // 2024-09-30+ but is still present at runtime (same cast as webhook).
+        const periodEnd = subscription.current_period_end;
+        const endDate = new Date(periodEnd * 1000);
         // Save subscription to Firestore
         await admin.firestore().collection('subscriptions').doc(userId).set({
             userId,
@@ -163,13 +174,14 @@ exports.createSubscription = (0, https_1.onCall)({
                 type: 'credit_card',
             },
         });
-        // Update user profile premium status
-        await admin.firestore().collection('userProfiles').doc(userId).update({
+        // Update user profile premium status (set+merge: must not fail if
+        // the profile doc hasn't been created yet)
+        await admin.firestore().collection('userProfiles').doc(userId).set({
             isPremium: true,
             premiumPlan: planId,
             premiumExpiry: admin.firestore.Timestamp.fromDate(endDate),
             premiumUpdatedAt: admin.firestore.Timestamp.now(),
-        });
+        }, { merge: true });
         return {
             subscriptionId: subscription.id,
             stripeCustomerId: customerId,
@@ -188,6 +200,24 @@ exports.createPaymentIntent = (0, https_1.onCall)({
         throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
     }
     const { amount, currency, paymentMethodId, description, metadata, receiptEmail } = request.data;
+    // Validate client-supplied inputs — never trust arbitrary amounts.
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 500) {
+        throw new https_1.HttpsError('invalid-argument', 'Invalid payment amount');
+    }
+    if (currency !== 'usd') {
+        throw new https_1.HttpsError('invalid-argument', 'Unsupported currency');
+    }
+    if (typeof paymentMethodId !== 'string' || !paymentMethodId.startsWith('pm_')) {
+        throw new https_1.HttpsError('invalid-argument', 'Invalid payment method');
+    }
+    if (typeof description !== 'string' || description.length === 0 || description.length > 200) {
+        throw new https_1.HttpsError('invalid-argument', 'Invalid description');
+    }
+    // Receipts go to the verified account email only — ignore client-supplied
+    // receiptEmail, which could be used to spam arbitrary addresses with
+    // Stripe receipts.
+    const verifiedReceiptEmail = request.auth.token.email;
+    void receiptEmail;
     try {
         const paymentIntent = await getStripe().paymentIntents.create({
             amount: Math.round(amount * 100), // Convert to cents
@@ -200,7 +230,7 @@ exports.createPaymentIntent = (0, https_1.onCall)({
             },
             description,
             metadata: Object.assign(Object.assign({}, metadata), { userId: request.auth.uid }),
-            receipt_email: receiptEmail,
+            receipt_email: verifiedReceiptEmail,
         });
         return {
             clientSecret: paymentIntent.client_secret,
@@ -488,7 +518,7 @@ async function syncPremiumStatus(userId, isPremium, plan, expiry) {
         else if (!isPremium) {
             updateData.premiumExpiry = null;
         }
-        await admin.firestore().collection('userProfiles').doc(userId).update(updateData);
+        await admin.firestore().collection('userProfiles').doc(userId).set(updateData, { merge: true });
     }
     catch (error) {
         console.error('Failed to sync premium status:', error);
@@ -602,13 +632,14 @@ exports.stripeWebhook = (0, https_2.onRequest)({
                         stripeCustomerId: subscription.customer,
                         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
                     }, { merge: true });
-                    // Update user profile premium status
-                    await admin.firestore().collection('userProfiles').doc(userId).update({
+                    // Update user profile premium status (set+merge: webhook can
+                    // fire before the profile trigger has created the doc)
+                    await admin.firestore().collection('userProfiles').doc(userId).set({
                         isPremium: subscription.status === 'active',
                         premiumPlan: subscription.metadata.planId,
                         premiumExpiry: admin.firestore.Timestamp.fromDate(new Date(periodEnd * 1000)),
                         premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                    });
+                    }, { merge: true });
                 }
                 break;
             }
@@ -620,13 +651,13 @@ exports.stripeWebhook = (0, https_2.onRequest)({
                         status: 'canceled',
                         canceledAt: admin.firestore.FieldValue.serverTimestamp(),
                     });
-                    // Update user profile premium status
-                    await admin.firestore().collection('userProfiles').doc(userId).update({
+                    // Update user profile premium status (set+merge)
+                    await admin.firestore().collection('userProfiles').doc(userId).set({
                         isPremium: false,
                         premiumPlan: null,
                         premiumExpiry: null,
                         premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                    });
+                    }, { merge: true });
                 }
                 break;
             }
@@ -716,7 +747,41 @@ exports.deleteAccount = (0, https_1.onCall)({
         // Log but don't block deletion — Stripe subscription may already be cancelled
         console.error('deleteAccount: Stripe cancellation error (continuing):', err);
     }
-    // 2. Delete all Firestore data for this user
+    // 2. Delete the user's community content (previously left orphaned).
+    //    recursiveDelete removes each post AND its comments subcollection.
+    try {
+        const postRefs = [];
+        // Non-anonymous prayers and discussions authored by this user
+        for (const coll of ['prayers', 'biblical-discussions']) {
+            const snap = await db.collection(coll).where('userId', '==', userId).get();
+            snap.docs.forEach(d => postRefs.push(d.ref));
+        }
+        // Anonymous prayers, located via the private ownership records
+        const ownedSnap = await db.collection(`users/${userId}/ownedPrayers`).get();
+        ownedSnap.docs.forEach(d => postRefs.push(db.collection('prayers').doc(d.id)));
+        for (const ref of postRefs) {
+            await db.recursiveDelete(ref);
+        }
+        // Comments this user left on OTHER people's posts
+        // (requires the COLLECTION_GROUP index on comments.userId — see firestore.indexes.json)
+        const deletedPostPaths = new Set(postRefs.map(r => r.path));
+        const commentsSnap = await db.collectionGroup('comments').where('userId', '==', userId).get();
+        for (const commentDoc of commentsSnap.docs) {
+            const parentPost = commentDoc.ref.parent.parent;
+            // Skip comments under posts we already recursively deleted
+            if (parentPost && deletedPostPaths.has(parentPost.path))
+                continue;
+            await commentDoc.ref.delete();
+            if (parentPost) {
+                // Keep the parent's commentCount accurate (best-effort)
+                await parentPost.set({ commentCount: admin.firestore.FieldValue.increment(-1) }, { merge: true }).catch(() => { });
+            }
+        }
+    }
+    catch (err) {
+        console.error('deleteAccount: failed to delete community content (continuing):', err);
+    }
+    // 3. Delete all Firestore data for this user
     const collectionsToDelete = [
         db.collection('users').doc(userId),
         db.collection('userProfiles').doc(userId),
@@ -741,7 +806,7 @@ exports.deleteAccount = (0, https_1.onCall)({
     const batch = db.batch();
     collectionsToDelete.forEach(ref => batch.delete(ref));
     await batch.commit();
-    // 3. Delete the Firebase Auth account last (invalidates all tokens)
+    // 4. Delete the Firebase Auth account last (invalidates all tokens)
     await admin.auth().deleteUser(userId);
     return { success: true };
 });

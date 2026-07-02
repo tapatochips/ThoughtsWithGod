@@ -30,6 +30,15 @@ service cloud.firestore {
       return text is string && text.size() > 0 && text.size() <= maxLen;
     }
 
+    // The username written on a post/comment must match the caller's actual
+    // profile username. Without this, any user could post as "PastorJohn" or
+    // impersonate another member. If the profile doc doesn't exist yet (first
+    // moments of a brand-new account), any length-valid username is allowed.
+    function usernameMatchesProfile(name) {
+      return !exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) ||
+             name == get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.username;
+    }
+
     // Enforce that this same request also writes the caller's rate-limit doc
     // with the current server time. getAfter() evaluates post-write state, so
     // this can only be true if the rateLimits update is part of the same
@@ -163,7 +172,8 @@ service cloud.firestore {
                         // Non-anonymous: userId must match auth, username validated normally
                         (request.resource.data.get('isAnonymous', false) == false &&
                          request.resource.data.userId == request.auth.uid &&
-                         isValidLength(request.resource.data.username, 1, 30)) ||
+                         isValidLength(request.resource.data.username, 1, 30) &&
+                         usernameMatchesProfile(request.resource.data.username)) ||
                         // Anonymous: userId must be null, username must be 'Anonymous',
                         // and the private ownership record MUST be created in the same
                         // batch (prevents orphaned anonymous prayers with no owner).
@@ -180,6 +190,8 @@ service cloud.firestore {
                        (resource.data.get('isAnonymous', false) == true && isAnonymousPrayerOwner(prayerId))) &&
                       // Prevent changing userId
                       request.resource.data.userId == resource.data.userId &&
+                      // Prevent changing username after creation (impersonation)
+                      request.resource.data.username == resource.data.username &&
                       // Validate text if being updated
                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
                        isValidContent(request.resource.data.text, 2000));
@@ -212,8 +224,9 @@ service cloud.firestore {
                         request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
                         // Validate content length (max 500 chars)
                         isValidContent(request.resource.data.text, 500) &&
-                        // Validate username
-                        isValidLength(request.resource.data.username, 1, 30);
+                        // Validate username and require it to match the caller's profile
+                        isValidLength(request.resource.data.username, 1, 30) &&
+                        usernameMatchesProfile(request.resource.data.username);
 
         // Only the comment creator can update or delete their comment
         allow update: if isAuthenticated() &&
@@ -223,8 +236,14 @@ service cloud.firestore {
                         // Validate text if being updated
                         isValidContent(request.resource.data.text, 500);
 
+        // A comment can be deleted by its author, or by the owner of the parent
+        // prayer (so deleting a prayer can cascade-delete all of its comments —
+        // previously this failed whenever someone else had commented).
         allow delete: if isAuthenticated() &&
-                        resource.data.userId == request.auth.uid;
+                        (resource.data.userId == request.auth.uid ||
+                         get(/databases/$(database)/documents/prayers/$(prayerId)).data.userId == request.auth.uid ||
+                         (get(/databases/$(database)/documents/prayers/$(prayerId)).data.get('isAnonymous', false) == true &&
+                          isAnonymousPrayerOwner(prayerId)));
       }
     }
 
@@ -246,8 +265,9 @@ service cloud.firestore {
                       request.resource.data.createdAt == request.time &&
                       // Validate content length (max 2000 chars)
                       isValidContent(request.resource.data.text, 2000) &&
-                      // Validate username
+                      // Validate username and require it to match the caller's profile
                       isValidLength(request.resource.data.username, 1, 30) &&
+                      usernameMatchesProfile(request.resource.data.username) &&
                       // Ensure likedBy starts empty
                       request.resource.data.likedBy == [] &&
                       // Ensure commentCount starts at 0
@@ -258,6 +278,8 @@ service cloud.firestore {
                       resource.data.userId == request.auth.uid &&
                       // Prevent changing userId
                       request.resource.data.userId == resource.data.userId &&
+                      // Prevent changing username after creation (impersonation)
+                      request.resource.data.username == resource.data.username &&
                       // Validate text if being updated
                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
                        isValidContent(request.resource.data.text, 2000));
@@ -288,8 +310,9 @@ service cloud.firestore {
                         request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
                         // Validate content length (max 500 chars)
                         isValidContent(request.resource.data.text, 500) &&
-                        // Validate username
-                        isValidLength(request.resource.data.username, 1, 30);
+                        // Validate username and require it to match the caller's profile
+                        isValidLength(request.resource.data.username, 1, 30) &&
+                        usernameMatchesProfile(request.resource.data.username);
 
         // Only the comment creator can update or delete their comment
         allow update: if isAuthenticated() &&
@@ -299,8 +322,11 @@ service cloud.firestore {
                         // Validate text if being updated
                         isValidContent(request.resource.data.text, 500);
 
+        // A comment can be deleted by its author, or by the owner of the parent
+        // discussion (so deleting a discussion can cascade-delete its comments).
         allow delete: if isAuthenticated() &&
-                        resource.data.userId == request.auth.uid;
+                        (resource.data.userId == request.auth.uid ||
+                         get(/databases/$(database)/documents/biblical-discussions/$(discussionId)).data.userId == request.auth.uid);
       }
     }
   }

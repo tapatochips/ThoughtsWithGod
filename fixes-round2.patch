@@ -1,0 +1,3635 @@
+diff --git a/functions/firestore.indexes.json b/functions/firestore.indexes.json
+index 415027e5..7b7ae259 100644
+--- a/functions/firestore.indexes.json
++++ b/functions/firestore.indexes.json
+@@ -1,4 +1,13 @@
+ {
+   "indexes": [],
+-  "fieldOverrides": []
++  "fieldOverrides": [
++    {
++      "collectionGroup": "comments",
++      "fieldPath": "userId",
++      "indexes": [
++        { "queryScope": "COLLECTION", "order": "ASCENDING" },
++        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
++      ]
++    }
++  ]
+ }
+diff --git a/functions/firestore.rules b/functions/firestore.rules
+index 81fd85d9..caa10989 100644
+--- a/functions/firestore.rules
++++ b/functions/firestore.rules
+@@ -30,6 +30,15 @@ service cloud.firestore {
+       return text is string && text.size() > 0 && text.size() <= maxLen;
+     }
+ 
++    // The username written on a post/comment must match the caller's actual
++    // profile username. Without this, any user could post as "PastorJohn" or
++    // impersonate another member. If the profile doc doesn't exist yet (first
++    // moments of a brand-new account), any length-valid username is allowed.
++    function usernameMatchesProfile(name) {
++      return !exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid)) ||
++             name == get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.username;
++    }
++
+     // Enforce that this same request also writes the caller's rate-limit doc
+     // with the current server time. getAfter() evaluates post-write state, so
+     // this can only be true if the rateLimits update is part of the same
+@@ -163,7 +172,8 @@ service cloud.firestore {
+                         // Non-anonymous: userId must match auth, username validated normally
+                         (request.resource.data.get('isAnonymous', false) == false &&
+                          request.resource.data.userId == request.auth.uid &&
+-                         isValidLength(request.resource.data.username, 1, 30)) ||
++                         isValidLength(request.resource.data.username, 1, 30) &&
++                         usernameMatchesProfile(request.resource.data.username)) ||
+                         // Anonymous: userId must be null, username must be 'Anonymous',
+                         // and the private ownership record MUST be created in the same
+                         // batch (prevents orphaned anonymous prayers with no owner).
+@@ -180,6 +190,8 @@ service cloud.firestore {
+                        (resource.data.get('isAnonymous', false) == true && isAnonymousPrayerOwner(prayerId))) &&
+                       // Prevent changing userId
+                       request.resource.data.userId == resource.data.userId &&
++                      // Prevent changing username after creation (impersonation)
++                      request.resource.data.username == resource.data.username &&
+                       // Validate text if being updated
+                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
+                        isValidContent(request.resource.data.text, 2000));
+@@ -212,8 +224,9 @@ service cloud.firestore {
+                         request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                         // Validate content length (max 500 chars)
+                         isValidContent(request.resource.data.text, 500) &&
+-                        // Validate username
+-                        isValidLength(request.resource.data.username, 1, 30);
++                        // Validate username and require it to match the caller's profile
++                        isValidLength(request.resource.data.username, 1, 30) &&
++                        usernameMatchesProfile(request.resource.data.username);
+ 
+         // Only the comment creator can update or delete their comment
+         allow update: if isAuthenticated() &&
+@@ -223,8 +236,14 @@ service cloud.firestore {
+                         // Validate text if being updated
+                         isValidContent(request.resource.data.text, 500);
+ 
++        // A comment can be deleted by its author, or by the owner of the parent
++        // prayer (so deleting a prayer can cascade-delete all of its comments —
++        // previously this failed whenever someone else had commented).
+         allow delete: if isAuthenticated() &&
+-                        resource.data.userId == request.auth.uid;
++                        (resource.data.userId == request.auth.uid ||
++                         get(/databases/$(database)/documents/prayers/$(prayerId)).data.userId == request.auth.uid ||
++                         (get(/databases/$(database)/documents/prayers/$(prayerId)).data.get('isAnonymous', false) == true &&
++                          isAnonymousPrayerOwner(prayerId)));
+       }
+     }
+ 
+@@ -246,8 +265,9 @@ service cloud.firestore {
+                       request.resource.data.createdAt == request.time &&
+                       // Validate content length (max 2000 chars)
+                       isValidContent(request.resource.data.text, 2000) &&
+-                      // Validate username
++                      // Validate username and require it to match the caller's profile
+                       isValidLength(request.resource.data.username, 1, 30) &&
++                      usernameMatchesProfile(request.resource.data.username) &&
+                       // Ensure likedBy starts empty
+                       request.resource.data.likedBy == [] &&
+                       // Ensure commentCount starts at 0
+@@ -258,6 +278,8 @@ service cloud.firestore {
+                       resource.data.userId == request.auth.uid &&
+                       // Prevent changing userId
+                       request.resource.data.userId == resource.data.userId &&
++                      // Prevent changing username after creation (impersonation)
++                      request.resource.data.username == resource.data.username &&
+                       // Validate text if being updated
+                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
+                        isValidContent(request.resource.data.text, 2000));
+@@ -288,8 +310,9 @@ service cloud.firestore {
+                         request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                         // Validate content length (max 500 chars)
+                         isValidContent(request.resource.data.text, 500) &&
+-                        // Validate username
+-                        isValidLength(request.resource.data.username, 1, 30);
++                        // Validate username and require it to match the caller's profile
++                        isValidLength(request.resource.data.username, 1, 30) &&
++                        usernameMatchesProfile(request.resource.data.username);
+ 
+         // Only the comment creator can update or delete their comment
+         allow update: if isAuthenticated() &&
+@@ -299,8 +322,11 @@ service cloud.firestore {
+                         // Validate text if being updated
+                         isValidContent(request.resource.data.text, 500);
+ 
++        // A comment can be deleted by its author, or by the owner of the parent
++        // discussion (so deleting a discussion can cascade-delete its comments).
+         allow delete: if isAuthenticated() &&
+-                        resource.data.userId == request.auth.uid;
++                        (resource.data.userId == request.auth.uid ||
++                         get(/databases/$(database)/documents/biblical-discussions/$(discussionId)).data.userId == request.auth.uid);
+       }
+     }
+   }
+diff --git a/functions/index.tsx b/functions/index.tsx
+index 4266514e..8f3c3535 100644
+--- a/functions/index.tsx
++++ b/functions/index.tsx
+@@ -138,9 +138,13 @@ export const createSubscription = onCall<CreateSubscriptionData>(
+                 metadata: { userId, planId },
+             });
+ 
+-            // Calculate end date
+-            const endDate = new Date();
+-            endDate.setMonth(endDate.getMonth() + (planId.includes('yearly') ? 12 : 1));
++            // Use Stripe's actual billing period end as the source of truth
++            // instead of computing it locally with setMonth() — local math can
++            // disagree with Stripe (billing anchors, trials, proration).
++            // current_period_end was removed from Stripe's TS types in API
++            // 2024-09-30+ but is still present at runtime (same cast as webhook).
++            const periodEnd = (subscription as unknown as { current_period_end: number }).current_period_end;
++            const endDate = new Date(periodEnd * 1000);
+ 
+             // Save subscription to Firestore
+             await admin.firestore().collection('subscriptions').doc(userId).set({
+@@ -158,13 +162,14 @@ export const createSubscription = onCall<CreateSubscriptionData>(
+                 },
+             });
+ 
+-            // Update user profile premium status
+-            await admin.firestore().collection('userProfiles').doc(userId).update({
++            // Update user profile premium status (set+merge: must not fail if
++            // the profile doc hasn't been created yet)
++            await admin.firestore().collection('userProfiles').doc(userId).set({
+                 isPremium: true,
+                 premiumPlan: planId,
+                 premiumExpiry: admin.firestore.Timestamp.fromDate(endDate),
+                 premiumUpdatedAt: admin.firestore.Timestamp.now(),
+-            });
++            }, { merge: true });
+ 
+             return {
+                 subscriptionId: subscription.id,
+@@ -200,6 +205,25 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
+ 
+         const { amount, currency, paymentMethodId, description, metadata, receiptEmail } = request.data;
+ 
++        // Validate client-supplied inputs — never trust arbitrary amounts.
++        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 500) {
++            throw new HttpsError('invalid-argument', 'Invalid payment amount');
++        }
++        if (currency !== 'usd') {
++            throw new HttpsError('invalid-argument', 'Unsupported currency');
++        }
++        if (typeof paymentMethodId !== 'string' || !paymentMethodId.startsWith('pm_')) {
++            throw new HttpsError('invalid-argument', 'Invalid payment method');
++        }
++        if (typeof description !== 'string' || description.length === 0 || description.length > 200) {
++            throw new HttpsError('invalid-argument', 'Invalid description');
++        }
++        // Receipts go to the verified account email only — ignore client-supplied
++        // receiptEmail, which could be used to spam arbitrary addresses with
++        // Stripe receipts.
++        const verifiedReceiptEmail = request.auth.token.email;
++        void receiptEmail;
++
+         try {
+             const paymentIntent = await getStripe().paymentIntents.create({
+                 amount: Math.round(amount * 100), // Convert to cents
+@@ -215,7 +239,7 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
+                     ...metadata,
+                     userId: request.auth.uid,
+                 },
+-                receipt_email: receiptEmail,
++                receipt_email: verifiedReceiptEmail,
+             });
+ 
+             return {
+@@ -573,7 +597,7 @@ async function syncPremiumStatus(userId: string, isPremium: boolean, plan?: stri
+             updateData.premiumExpiry = null;
+         }
+ 
+-        await admin.firestore().collection('userProfiles').doc(userId).update(updateData);
++        await admin.firestore().collection('userProfiles').doc(userId).set(updateData, { merge: true });
+     } catch (error) {
+         console.error('Failed to sync premium status:', error);
+     }
+@@ -725,13 +749,14 @@ export const stripeWebhook = onRequest(
+                             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                         }, { merge: true });
+ 
+-                        // Update user profile premium status
+-                        await admin.firestore().collection('userProfiles').doc(userId).update({
++                        // Update user profile premium status (set+merge: webhook can
++                        // fire before the profile trigger has created the doc)
++                        await admin.firestore().collection('userProfiles').doc(userId).set({
+                             isPremium: subscription.status === 'active',
+                             premiumPlan: subscription.metadata.planId,
+                             premiumExpiry: admin.firestore.Timestamp.fromDate(new Date(periodEnd * 1000)),
+                             premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+-                        });
++                        }, { merge: true });
+                     }
+                     break;
+                 }
+@@ -746,13 +771,13 @@ export const stripeWebhook = onRequest(
+                             canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+                         });
+ 
+-                        // Update user profile premium status
+-                        await admin.firestore().collection('userProfiles').doc(userId).update({
++                        // Update user profile premium status (set+merge)
++                        await admin.firestore().collection('userProfiles').doc(userId).set({
+                             isPremium: false,
+                             premiumPlan: null,
+                             premiumExpiry: null,
+                             premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+-                        });
++                        }, { merge: true });
+                     }
+                     break;
+                 }
+@@ -855,7 +880,47 @@ export const deleteAccount = onCall(
+             console.error('deleteAccount: Stripe cancellation error (continuing):', err);
+         }
+ 
+-        // 2. Delete all Firestore data for this user
++        // 2. Delete the user's community content (previously left orphaned).
++        //    recursiveDelete removes each post AND its comments subcollection.
++        try {
++            const postRefs: FirebaseFirestore.DocumentReference[] = [];
++
++            // Non-anonymous prayers and discussions authored by this user
++            for (const coll of ['prayers', 'biblical-discussions']) {
++                const snap = await db.collection(coll).where('userId', '==', userId).get();
++                snap.docs.forEach(d => postRefs.push(d.ref));
++            }
++
++            // Anonymous prayers, located via the private ownership records
++            const ownedSnap = await db.collection(`users/${userId}/ownedPrayers`).get();
++            ownedSnap.docs.forEach(d => postRefs.push(db.collection('prayers').doc(d.id)));
++
++            for (const ref of postRefs) {
++                await db.recursiveDelete(ref);
++            }
++
++            // Comments this user left on OTHER people's posts
++            // (requires the COLLECTION_GROUP index on comments.userId — see firestore.indexes.json)
++            const deletedPostPaths = new Set(postRefs.map(r => r.path));
++            const commentsSnap = await db.collectionGroup('comments').where('userId', '==', userId).get();
++            for (const commentDoc of commentsSnap.docs) {
++                const parentPost = commentDoc.ref.parent.parent;
++                // Skip comments under posts we already recursively deleted
++                if (parentPost && deletedPostPaths.has(parentPost.path)) continue;
++                await commentDoc.ref.delete();
++                if (parentPost) {
++                    // Keep the parent's commentCount accurate (best-effort)
++                    await parentPost.set(
++                        { commentCount: admin.firestore.FieldValue.increment(-1) },
++                        { merge: true }
++                    ).catch(() => { /* parent may have been deleted concurrently */ });
++                }
++            }
++        } catch (err) {
++            console.error('deleteAccount: failed to delete community content (continuing):', err);
++        }
++
++        // 3. Delete all Firestore data for this user
+         const collectionsToDelete = [
+             db.collection('users').doc(userId),
+             db.collection('userProfiles').doc(userId),
+@@ -881,7 +946,7 @@ export const deleteAccount = onCall(
+         collectionsToDelete.forEach(ref => batch.delete(ref));
+         await batch.commit();
+ 
+-        // 3. Delete the Firebase Auth account last (invalidates all tokens)
++        // 4. Delete the Firebase Auth account last (invalidates all tokens)
+         await admin.auth().deleteUser(userId);
+ 
+         return { success: true };
+diff --git a/package.json b/package.json
+index 4b5a43b5..f4687efa 100644
+--- a/package.json
++++ b/package.json
+@@ -11,6 +11,7 @@
+   },
+   "dependencies": {
+     "@expo/ngrok": "^4.1.3",
++    "@expo/vector-icons": "^15.1.1",
+     "@react-native-async-storage/async-storage": "2.2.0",
+     "@react-native-community/cli": "^18.0.0",
+     "@react-navigation/native": "^7.1.6",
+diff --git a/src/components/community/CommunityBoard.tsx b/src/components/community/CommunityBoard.tsx
+new file mode 100644
+index 00000000..10d701df
+--- /dev/null
++++ b/src/components/community/CommunityBoard.tsx
+@@ -0,0 +1,1142 @@
++import React, { useState, useEffect } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TextInput,
++  TouchableOpacity,
++  FlatList,
++  Alert,
++  Modal,
++  Platform,
++  ActivityIndicator,
++  KeyboardAvoidingView,
++  StatusBar
++} from 'react-native';
++import { useFirebase } from '../../context/FirebaseContext';
++import { useTheme } from '../../context/ThemeProvider';
++import {
++  collection,
++  addDoc,
++  onSnapshot,
++  doc,
++  deleteDoc,
++  updateDoc,
++  writeBatch,
++  query,
++  orderBy,
++  serverTimestamp,
++  arrayUnion,
++  arrayRemove,
++  getDocs,
++  increment
++} from 'firebase/firestore';
++import { Ionicons } from '@expo/vector-icons';
++import Constants from 'expo-constants';
++import { validatePrayer, validateComment, LIMITS } from '../../utils/inputValidation';
++import { formatRelativeDate } from '../../utils/dateUtils';
++
++// =================== TYPES ===================
++
++export interface CommunityComment {
++  id: string;
++  text: string;
++  userId: string;
++  username: string;
++  createdAt: any;
++}
++
++export interface CommunityPost {
++  id: string;
++  text: string;
++  userId: string | null;
++  username: string;
++  createdAt: any;
++  likedBy: string[];
++  commentCount: number;
++  answered?: boolean;
++  isAnonymous?: boolean;
++}
++
++/**
++ * Everything that differs between the Prayer Board and Biblical Discussions
++ * lives in this config. The component itself is identical for both.
++ */
++export interface CommunityBoardConfig {
++  /** Firestore collection name, e.g. 'prayers' or 'biblical-discussions' */
++  collectionName: string;
++  /** Singular noun for alerts, e.g. 'prayer request' or 'discussion' */
++  itemNoun: string;
++  title: string;
++  subtitle: string;
++  inputPlaceholder: string;
++  addButtonLabel: string;
++  loadingText: string;
++  loginPromptText: string;
++  emptyTitle: string;
++  emptySubtitle: string;
++  emptyIcon: keyof typeof Ionicons.glyphMap;
++  /** Enables the "Post anonymously" toggle + private ownedPrayers ownership records */
++  supportsAnonymous?: boolean;
++  /** Enables the "Mark Answered" owner action and Answered badge */
++  supportsAnswered?: boolean;
++}
++
++interface CommunityBoardProps {
++  config: CommunityBoardConfig;
++}
++
++// =================== COMPONENT ===================
++
++const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
++  const { user, db, userProfile } = useFirebase();
++  const { theme } = useTheme();
++  const [newPost, setNewPost] = useState('');
++  const [posts, setPosts] = useState<CommunityPost[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [newComment, setNewComment] = useState('');
++  const [comments, setComments] = useState<CommunityComment[]>([]);
++  const [modalVisible, setModalVisible] = useState(false);
++  const [selectedPost, setSelectedPost] = useState<CommunityPost | null>(null);
++  const [submitting, setSubmitting] = useState(false);
++  const [isAnonymous, setIsAnonymous] = useState(false);
++  const [ownedPostIds, setOwnedPostIds] = useState<Set<string>>(new Set());
++
++  const { collectionName } = config;
++
++  // Subscribe to posts
++  useEffect(() => {
++    if (!db || !user) {
++      setLoading(false);
++      return;
++    }
++
++    const postsCollection = collection(db, collectionName);
++    const postsQuery = query(postsCollection, orderBy('createdAt', 'desc'));
++
++    const unsubscribe = onSnapshot(
++      postsQuery,
++      (snapshot) => {
++        const fetched: CommunityPost[] = [];
++        snapshot.forEach((docSnap) => {
++          const data = docSnap.data();
++          fetched.push({
++            ...data,
++            id: docSnap.id,
++            likedBy: data.likedBy || [],
++            commentCount: data.commentCount || 0
++          } as CommunityPost);
++        });
++        setPosts(fetched);
++        setLoading(false);
++      },
++      (error) => {
++        console.error(`Error fetching ${config.itemNoun}s:`, error);
++        setLoading(false);
++      }
++    );
++
++    return unsubscribe;
++  }, [db, user, collectionName]);
++
++  // Subscribe to the private ownership subcollection so we can show owner
++  // controls on anonymous posts the current user created without exposing
++  // their userId publicly. Only relevant when anonymous posting is enabled.
++  useEffect(() => {
++    if (!config.supportsAnonymous || !db || !user) {
++      setOwnedPostIds(new Set());
++      return;
++    }
++
++    const ownedCollection = collection(db, `users/${user.uid}/ownedPrayers`);
++    const unsubscribe = onSnapshot(
++      ownedCollection,
++      (snapshot) => {
++        const ids = new Set<string>();
++        snapshot.forEach((d) => ids.add(d.id));
++        setOwnedPostIds(ids);
++      },
++      (error) => {
++        console.error('Error fetching owned posts:', error);
++      }
++    );
++
++    return unsubscribe;
++  }, [db, user, config.supportsAnonymous]);
++
++  // Subscribe to comments for the selected post
++  useEffect(() => {
++    if (!db || !selectedPost) {
++      setComments([]);
++      return;
++    }
++
++    const commentsCollection = collection(db, `${collectionName}/${selectedPost.id}/comments`);
++    const commentsQuery = query(commentsCollection, orderBy('createdAt', 'asc'));
++
++    const unsubscribe = onSnapshot(
++      commentsQuery,
++      (snapshot) => {
++        const fetched: CommunityComment[] = [];
++        snapshot.forEach((docSnap) => {
++          const data = docSnap.data();
++          fetched.push({
++            ...data,
++            id: docSnap.id,
++          } as CommunityComment);
++        });
++        setComments(fetched);
++      },
++      (error) => {
++        console.error('Error fetching comments:', error);
++      }
++    );
++
++    return unsubscribe;
++  }, [db, selectedPost, collectionName]);
++
++  const isOwner = (post: CommunityPost) =>
++    !!user && (post.userId === user.uid || ownedPostIds.has(post.id));
++
++  const handleAddPost = async () => {
++    if (!user || !db || !newPost.trim()) return;
++
++    const validation = validatePrayer(newPost);
++    if (!validation.valid) {
++      Alert.alert('Invalid Input', validation.error);
++      return;
++    }
++
++    const postAnonymously = !!config.supportsAnonymous && isAnonymous;
++
++    setSubmitting(true);
++
++    try {
++      const batch = writeBatch(db);
++
++      // Pre-generate the post document reference so we can reference its ID
++      const postRef = doc(collection(db, collectionName));
++      const postData: Record<string, any> = {
++        text: validation.sanitized,
++        // For anonymous posts userId and username are omitted from the public
++        // document to prevent de-anonymisation via direct Firestore reads.
++        userId: postAnonymously ? null : user.uid,
++        username: postAnonymously
++          ? 'Anonymous'
++          : (userProfile?.username || `User_${user.uid.substring(0, 5)}`),
++        // Security rules require createdAt == request.time, so this MUST be serverTimestamp()
++        createdAt: serverTimestamp(),
++        likedBy: [],
++        commentCount: 0
++      };
++      if (config.supportsAnswered) {
++        postData.answered = false;
++      }
++      if (config.supportsAnonymous) {
++        postData.isAnonymous = postAnonymously;
++      }
++      batch.set(postRef, postData);
++
++      // Update rate limit atomically with the post creation.
++      // Security rules REQUIRE this write in the same batch (updatesRateLimit),
++      // and only allow lastActionAt == request.time.
++      const rateLimitRef = doc(db, `rateLimits/${user.uid}`);
++      batch.set(rateLimitRef, { lastActionAt: serverTimestamp() });
++
++      if (postAnonymously) {
++        // The private ownership record MUST be created in the same batch as
++        // the post — security rules enforce this atomicity.
++        const ownerDoc = doc(db, `users/${user.uid}/ownedPrayers`, postRef.id);
++        batch.set(ownerDoc, { prayerId: postRef.id, createdAt: serverTimestamp() });
++      }
++
++      await batch.commit();
++
++      setNewPost('');
++      setIsAnonymous(false);
++    } catch (error) {
++      console.error(`Error adding ${config.itemNoun}:`, error);
++      Alert.alert('Error', `Failed to add ${config.itemNoun}. Please try again.`);
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  const handleToggleAnswered = async (post: CommunityPost) => {
++    if (!db || !user || !isOwner(post)) return;
++
++    try {
++      const postDoc = doc(db, collectionName, post.id);
++      await updateDoc(postDoc, {
++        answered: !post.answered,
++      });
++    } catch (error) {
++      console.error(`Error updating ${config.itemNoun}:`, error);
++      Alert.alert('Error', `Failed to update ${config.itemNoun}. Please try again.`);
++    }
++  };
++
++  const handleDeletePost = async (post: CommunityPost) => {
++    if (!user || !db) return;
++
++    if (!isOwner(post)) {
++      Alert.alert('Permission Denied', `You can only delete your own ${config.itemNoun}s.`);
++      return;
++    }
++
++    Alert.alert(
++      'Confirm Delete',
++      `Are you sure you want to delete this ${config.itemNoun}? This will also delete all comments.`,
++      [
++        { text: 'Cancel', style: 'cancel' },
++        {
++          text: 'Delete',
++          style: 'destructive',
++          onPress: async () => {
++            try {
++              // Delete all comments in chunked batches (Firestore batch limit is 500 ops).
++              // Rules allow the post owner to delete comments under their own post.
++              const commentsCollection = collection(db, `${collectionName}/${post.id}/comments`);
++              const commentsSnapshot = await getDocs(commentsCollection);
++              const commentDocs = commentsSnapshot.docs;
++              for (let i = 0; i < commentDocs.length; i += 400) {
++                const chunk = commentDocs.slice(i, i + 400);
++                const commentBatch = writeBatch(db);
++                chunk.forEach((commentDoc) => commentBatch.delete(commentDoc.ref));
++                await commentBatch.commit();
++              }
++
++              // Delete the post and (for anonymous posts) the private ownership
++              // record together, so neither can be left behind.
++              const finalBatch = writeBatch(db);
++              finalBatch.delete(doc(db, collectionName, post.id));
++              if (config.supportsAnonymous && post.isAnonymous) {
++                finalBatch.delete(doc(db, `users/${user.uid}/ownedPrayers`, post.id));
++              }
++              await finalBatch.commit();
++            } catch (error) {
++              console.error(`Error deleting ${config.itemNoun}:`, error);
++              Alert.alert('Error', `Failed to delete ${config.itemNoun}. Please try again.`);
++            }
++          }
++        }
++      ]
++    );
++  };
++
++  const handleToggleLike = async (post: CommunityPost) => {
++    if (!user || !db) return;
++
++    try {
++      const postDoc = doc(db, collectionName, post.id);
++      const isLiked = post.likedBy.includes(user.uid);
++
++      await updateDoc(postDoc, {
++        likedBy: isLiked ? arrayRemove(user.uid) : arrayUnion(user.uid)
++      });
++    } catch (error) {
++      console.error('Error toggling like:', error);
++    }
++  };
++
++  const openComments = (post: CommunityPost) => {
++    setSelectedPost(post);
++    setModalVisible(true);
++  };
++
++  const handleAddComment = async () => {
++    if (!user || !db || !selectedPost || !newComment.trim()) return;
++
++    const validation = validateComment(newComment);
++    if (!validation.valid) {
++      Alert.alert('Invalid Input', validation.error);
++      return;
++    }
++
++    setSubmitting(true);
++
++    try {
++      const commentsCollection = collection(db, `${collectionName}/${selectedPost.id}/comments`);
++
++      await addDoc(commentsCollection, {
++        text: validation.sanitized,
++        userId: user.uid,
++        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
++        createdAt: serverTimestamp()
++      });
++
++      // Update comment count atomically to avoid race conditions
++      const postDoc = doc(db, collectionName, selectedPost.id);
++      await updateDoc(postDoc, {
++        commentCount: increment(1)
++      });
++
++      setNewComment('');
++    } catch (error) {
++      console.error('Error adding comment:', error);
++      Alert.alert('Error', 'Failed to add comment. Please try again.');
++    } finally {
++      setSubmitting(false);
++    }
++  };
++
++  const handleDeleteComment = async (commentId: string, commentUserId: string) => {
++    if (!user || !db || !selectedPost) return;
++
++    if (user.uid !== commentUserId) {
++      Alert.alert('Permission Denied', 'You can only delete your own comments.');
++      return;
++    }
++
++    try {
++      const commentDoc = doc(db, `${collectionName}/${selectedPost.id}/comments`, commentId);
++      await deleteDoc(commentDoc);
++
++      const postDoc = doc(db, collectionName, selectedPost.id);
++      await updateDoc(postDoc, {
++        commentCount: increment(-1)
++      });
++    } catch (error) {
++      console.error('Error deleting comment:', error);
++    }
++  };
++
++  // =================== RENDER ===================
++
++  if (loading) {
++    return (
++      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
++        <ActivityIndicator size="large" color={theme.colors.primary} />
++        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
++          {config.loadingText}
++        </Text>
++      </View>
++    );
++  }
++
++  if (!user) {
++    return (
++      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
++        <Ionicons name="person-circle-outline" size={48} color={theme.colors.primary} />
++        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
++          {config.loginPromptText}
++        </Text>
++      </View>
++    );
++  }
++
++  const renderAvatarInitial = (post: CommunityPost) =>
++    post.isAnonymous ? '?' : (post.username || 'U')[0].toUpperCase();
++
++  const renderUsername = (post: CommunityPost) =>
++    post.isAnonymous ? 'Anonymous' : (post.username || 'User');
++
++  return (
++    <KeyboardAvoidingView
++      style={{ flex: 1 }}
++      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
++      keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
++    >
++      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
++        <View style={[styles.header, { backgroundColor: theme.colors.card, ...getShadowStyle(theme) }]}>
++          <Text style={[styles.title, { color: theme.colors.text }]}>{config.title}</Text>
++          <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
++            {config.subtitle}
++          </Text>
++        </View>
++
++        <View style={[styles.inputContainer, {
++          borderColor: theme.colors.border,
++          backgroundColor: theme.colors.card,
++          ...getShadowStyle(theme)
++        }]}>
++          <TextInput
++            style={[styles.input, { color: theme.colors.text }]}
++            value={newPost}
++            onChangeText={setNewPost}
++            placeholder={config.inputPlaceholder}
++            placeholderTextColor={theme.colors.secondary}
++            multiline
++            maxLength={LIMITS.PRAYER_MAX_LENGTH}
++          />
++          <Text style={[styles.charCount, { color: theme.colors.textSecondary }]}>
++            {newPost.length}/{LIMITS.PRAYER_MAX_LENGTH}
++          </Text>
++
++          {config.supportsAnonymous && (
++            <View style={styles.anonymousToggleContainer}>
++              <TouchableOpacity
++                style={[styles.anonymousToggle, {
++                  backgroundColor: isAnonymous ? theme.colors.primary : 'transparent',
++                  borderColor: theme.colors.primary
++                }]}
++                onPress={() => setIsAnonymous(!isAnonymous)}
++              >
++                {isAnonymous && (
++                  <Ionicons name="checkmark" size={16} color="white" />
++                )}
++              </TouchableOpacity>
++              <Text style={[styles.anonymousLabel, { color: theme.colors.text }]}>
++                Post anonymously
++              </Text>
++            </View>
++          )}
++
++          <TouchableOpacity
++            style={[
++              styles.addButton,
++              { backgroundColor: theme.colors.primary },
++              submitting && { opacity: 0.7 }
++            ]}
++            onPress={handleAddPost}
++            disabled={submitting || !newPost.trim()}
++          >
++            {submitting ? (
++              <ActivityIndicator size="small" color="white" />
++            ) : (
++              <>
++                <Ionicons name="add" size={18} color="white" />
++                <Text style={styles.addButtonText}>{config.addButtonLabel}</Text>
++              </>
++            )}
++          </TouchableOpacity>
++        </View>
++
++        <FlatList
++          data={posts}
++          keyExtractor={(item) => item.id}
++          contentContainerStyle={styles.listContent}
++          showsVerticalScrollIndicator={false}
++          renderItem={({ item }) => (
++            <View style={[
++              styles.postItem,
++              {
++                backgroundColor: theme.colors.card,
++                borderColor: theme.colors.border,
++                ...getShadowStyle(theme)
++              },
++              config.supportsAnswered && item.answered &&
++                [styles.answeredPost, { borderColor: theme.colors.success }]
++            ]}>
++              <View style={styles.postHeader}>
++                <View style={styles.userInfo}>
++                  <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
++                    <Text style={styles.avatarText}>{renderAvatarInitial(item)}</Text>
++                  </View>
++                  <View>
++                    <Text style={[styles.username, { color: theme.colors.text }]}>
++                      {renderUsername(item)}
++                    </Text>
++                    <Text style={[styles.postDate, { color: theme.colors.textSecondary }]}>
++                      {formatRelativeDate(item.createdAt)}
++                    </Text>
++                  </View>
++                </View>
++
++                {config.supportsAnswered && item.answered && (
++                  <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
++                    <Text style={styles.answeredText}>Answered</Text>
++                  </View>
++                )}
++              </View>
++
++              <Text style={[styles.postText, { color: theme.colors.text }]}>
++                {item.text}
++              </Text>
++
++              <View style={[styles.interactionBar, { borderTopColor: theme.colors.divider }]}>
++                <TouchableOpacity
++                  style={styles.interactionButton}
++                  onPress={() => handleToggleLike(item)}
++                >
++                  <Ionicons
++                    name={item.likedBy.includes(user.uid) ? 'heart' : 'heart-outline'}
++                    size={20}
++                    color={item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary}
++                  />
++                  <Text style={[
++                    styles.interactionText,
++                    { color: item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary }
++                  ]}>
++                    {item.likedBy.length}
++                  </Text>
++                </TouchableOpacity>
++
++                <TouchableOpacity
++                  style={styles.interactionButton}
++                  onPress={() => openComments(item)}
++                >
++                  <Ionicons
++                    name="chatbubble-outline"
++                    size={18}
++                    color={theme.colors.textSecondary}
++                  />
++                  <Text style={[styles.interactionText, { color: theme.colors.textSecondary }]}>
++                    {item.commentCount || 0}
++                  </Text>
++                </TouchableOpacity>
++              </View>
++
++              {isOwner(item) && (
++                <View style={[styles.ownerActions, { borderTopColor: theme.colors.divider }]}>
++                  {config.supportsAnswered && (
++                    <TouchableOpacity
++                      style={[styles.ownerActionButton, { backgroundColor: theme.colors.surface }]}
++                      onPress={() => handleToggleAnswered(item)}
++                    >
++                      <Ionicons
++                        name={item.answered ? 'close-circle-outline' : 'checkmark-circle-outline'}
++                        size={18}
++                        color={item.answered ? theme.colors.danger : theme.colors.success}
++                      />
++                      <Text style={[
++                        styles.ownerActionText,
++                        { color: item.answered ? theme.colors.danger : theme.colors.success }
++                      ]}>
++                        {item.answered ? 'Mark Unanswered' : 'Mark Answered'}
++                      </Text>
++                    </TouchableOpacity>
++                  )}
++
++                  <TouchableOpacity
++                    style={[
++                      styles.ownerActionButton,
++                      { backgroundColor: `${theme.colors.danger}15` },
++                      !config.supportsAnswered && styles.ownerActionButtonFull
++                    ]}
++                    onPress={() => handleDeletePost(item)}
++                  >
++                    <Ionicons
++                      name="trash-outline"
++                      size={18}
++                      color={theme.colors.danger}
++                    />
++                    <Text style={[styles.ownerActionText, { color: theme.colors.danger }]}>
++                      Delete
++                    </Text>
++                  </TouchableOpacity>
++                </View>
++              )}
++            </View>
++          )}
++          ListEmptyComponent={
++            <View style={styles.emptyContainer}>
++              <Ionicons name={config.emptyIcon} size={64} color={theme.colors.secondary} />
++              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
++                {config.emptyTitle}
++              </Text>
++              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
++                {config.emptySubtitle}
++              </Text>
++            </View>
++          }
++        />
++
++        {/* Comments Modal */}
++        <Modal
++          animationType="slide"
++          transparent={false}
++          visible={modalVisible}
++          onRequestClose={() => setModalVisible(false)}
++        >
++          <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
++            <StatusBar
++              backgroundColor={theme.colors.card}
++              barStyle={theme.name === 'dark' ? 'light-content' : 'dark-content'}
++            />
++            <View style={[styles.modalHeader, {
++              backgroundColor: theme.colors.card,
++              borderBottomColor: theme.colors.divider,
++              paddingTop: Platform.OS === 'ios' ? 50 : Constants.statusBarHeight + 5,
++              ...getShadowStyle(theme)
++            }]}>
++              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.backButton}>
++                <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
++              </TouchableOpacity>
++              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
++              <View style={{ width: 24 }} />
++            </View>
++
++            <KeyboardAvoidingView
++              style={{ flex: 1 }}
++              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
++            >
++              {selectedPost && (
++                <View style={[
++                  styles.originalPost,
++                  {
++                    backgroundColor: theme.colors.card,
++                    borderLeftColor: theme.colors.primary,
++                    ...getShadowStyle(theme)
++                  }
++                ]}>
++                  <View style={styles.postHeader}>
++                    <View style={styles.userInfo}>
++                      <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
++                        <Text style={styles.avatarText}>{renderAvatarInitial(selectedPost)}</Text>
++                      </View>
++                      <View>
++                        <Text style={[styles.username, { color: theme.colors.text }]}>
++                          {renderUsername(selectedPost)}
++                        </Text>
++                        <Text style={[styles.postDate, { color: theme.colors.textSecondary }]}>
++                          {formatRelativeDate(selectedPost.createdAt)}
++                        </Text>
++                      </View>
++                    </View>
++
++                    {config.supportsAnswered && selectedPost.answered && (
++                      <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
++                        <Text style={styles.answeredText}>Answered</Text>
++                      </View>
++                    )}
++                  </View>
++                  <Text style={[styles.originalPostText, { color: theme.colors.text }]}>
++                    {selectedPost.text}
++                  </Text>
++                </View>
++              )}
++
++              <FlatList
++                data={comments}
++                keyExtractor={(item) => item.id}
++                contentContainerStyle={styles.commentsList}
++                ListHeaderComponent={
++                  comments.length > 0 ? (
++                    <Text style={[styles.commentsCount, { color: theme.colors.textSecondary }]}>
++                      {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
++                    </Text>
++                  ) : null
++                }
++                renderItem={({ item }) => (
++                  <View style={[
++                    styles.commentItem,
++                    {
++                      backgroundColor: user?.uid === item.userId
++                        ? `${theme.colors.primary}15`
++                        : theme.colors.card,
++                      borderLeftColor: user?.uid === item.userId
++                        ? theme.colors.primary
++                        : theme.colors.border
++                    }
++                  ]}>
++                    <View style={styles.commentHeader}>
++                      <View style={styles.commentUser}>
++                        <View style={[
++                          styles.smallAvatarCircle,
++                          {
++                            backgroundColor: user?.uid === item.userId
++                              ? theme.colors.primary
++                              : theme.colors.secondary
++                          }
++                        ]}>
++                          <Text style={styles.smallAvatarText}>
++                            {(item.username || 'U')[0].toUpperCase()}
++                          </Text>
++                        </View>
++                        <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
++                          {item.username || 'User'}
++                        </Text>
++                      </View>
++
++                      {user?.uid === item.userId && (
++                        <TouchableOpacity
++                          onPress={() => handleDeleteComment(item.id, item.userId)}
++                        >
++                          <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
++                        </TouchableOpacity>
++                      )}
++                    </View>
++                    <Text style={[styles.commentText, { color: theme.colors.text }]}>
++                      {item.text}
++                    </Text>
++                    <Text style={[styles.commentDate, { color: theme.colors.textSecondary }]}>
++                      {formatRelativeDate(item.createdAt)}
++                    </Text>
++                  </View>
++                )}
++                ListEmptyComponent={
++                  <View style={styles.emptyCommentsContainer}>
++                    <Ionicons name="chatbubble-outline" size={40} color={theme.colors.secondary} />
++                    <Text style={[styles.emptyCommentsText, { color: theme.colors.textSecondary }]}>
++                      No comments yet. Be the first to comment!
++                    </Text>
++                  </View>
++                }
++              />
++
++              <View style={[
++                styles.commentInputContainer,
++                {
++                  borderTopColor: theme.colors.divider,
++                  backgroundColor: theme.colors.card
++                }
++              ]}>
++                <TextInput
++                  style={[
++                    styles.commentInput,
++                    {
++                      backgroundColor: theme.colors.background,
++                      borderColor: theme.colors.border,
++                      color: theme.colors.text
++                    }
++                  ]}
++                  value={newComment}
++                  onChangeText={setNewComment}
++                  placeholder="Write a comment..."
++                  placeholderTextColor={theme.colors.secondary}
++                  multiline
++                  maxLength={LIMITS.COMMENT_MAX_LENGTH}
++                />
++                <TouchableOpacity
++                  style={[
++                    styles.postButton,
++                    { backgroundColor: theme.colors.primary },
++                    (submitting || !newComment.trim()) && { opacity: 0.5 }
++                  ]}
++                  onPress={handleAddComment}
++                  disabled={submitting || !newComment.trim()}
++                >
++                  {submitting ? (
++                    <ActivityIndicator size="small" color="white" />
++                  ) : (
++                    <Ionicons name="send" size={20} color="white" />
++                  )}
++                </TouchableOpacity>
++              </View>
++            </KeyboardAvoidingView>
++          </View>
++        </Modal>
++      </View>
++    </KeyboardAvoidingView>
++  );
++};
++
++// Helper function for consistent shadow styling
++const getShadowStyle = (theme: any) => {
++  if (Platform.OS === 'ios') {
++    return {
++      shadowColor: theme.colors.shadow,
++      shadowOffset: { width: 0, height: 2 },
++      shadowOpacity: 0.8,
++      shadowRadius: 3,
++    };
++  } else {
++    return {
++      elevation: 3,
++    };
++  }
++};
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++  },
++  centerContainer: {
++    flex: 1,
++    justifyContent: 'center',
++    alignItems: 'center',
++    padding: 16,
++  },
++  header: {
++    padding: 16,
++    borderRadius: 0,
++    marginBottom: 16,
++  },
++  title: {
++    fontSize: 24,
++    fontWeight: 'bold',
++    textAlign: 'center',
++  },
++  subtitle: {
++    fontSize: 14,
++    textAlign: 'center',
++    marginTop: 4,
++  },
++  inputContainer: {
++    marginHorizontal: 16,
++    marginBottom: 16,
++    borderRadius: 12,
++    borderWidth: 0,
++  },
++  input: {
++    padding: 16,
++    fontSize: 16,
++    minHeight: 100,
++    maxHeight: 150,
++    textAlignVertical: 'top',
++  },
++  addButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    padding: 12,
++    borderRadius: 8,
++    margin: 8,
++  },
++  addButtonText: {
++    color: 'white',
++    fontWeight: '600',
++    marginLeft: 8,
++  },
++  listContent: {
++    paddingHorizontal: 16,
++    paddingBottom: 24
++  },
++  postItem: {
++    borderRadius: 12,
++    marginBottom: 16,
++    borderWidth: 0,
++    overflow: 'hidden',
++  },
++  answeredPost: {
++    borderLeftWidth: 4,
++  },
++  postHeader: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    padding: 12,
++  },
++  userInfo: {
++    flexDirection: 'row',
++    alignItems: 'center',
++  },
++  avatarCircle: {
++    width: 36,
++    height: 36,
++    borderRadius: 18,
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginRight: 10,
++  },
++  avatarText: {
++    color: 'white',
++    fontSize: 16,
++    fontWeight: 'bold',
++  },
++  username: {
++    fontSize: 14,
++    fontWeight: '600',
++  },
++  postDate: {
++    fontSize: 12,
++  },
++  answeredBadge: {
++    paddingHorizontal: 8,
++    paddingVertical: 4,
++    borderRadius: 12,
++  },
++  answeredText: {
++    color: 'white',
++    fontSize: 12,
++    fontWeight: '600',
++  },
++  postText: {
++    fontSize: 16,
++    lineHeight: 24,
++    paddingHorizontal: 12,
++    paddingBottom: 16,
++  },
++  interactionBar: {
++    flexDirection: 'row',
++    borderTopWidth: 1,
++    paddingVertical: 8,
++    paddingHorizontal: 12,
++  },
++  interactionButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    marginRight: 20,
++  },
++  interactionText: {
++    marginLeft: 4,
++    fontSize: 14,
++  },
++  ownerActions: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    padding: 8,
++    borderTopWidth: 1,
++  },
++  ownerActionButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    paddingVertical: 8,
++    paddingHorizontal: 12,
++    borderRadius: 8,
++    flex: 0.48,
++  },
++  ownerActionButtonFull: {
++    flex: 1,
++  },
++  ownerActionText: {
++    marginLeft: 8,
++    fontSize: 14,
++    fontWeight: '500',
++  },
++  message: {
++    padding: 20,
++    textAlign: 'center',
++    fontSize: 16,
++  },
++  emptyContainer: {
++    alignItems: 'center',
++    justifyContent: 'center',
++    padding: 40,
++    marginTop: 20,
++  },
++  emptyTitle: {
++    fontSize: 18,
++    fontWeight: 'bold',
++    marginTop: 16,
++  },
++  emptySubtitle: {
++    fontSize: 14,
++    marginTop: 8,
++    textAlign: 'center',
++  },
++  modalContainer: {
++    flex: 1,
++  },
++  modalHeader: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    padding: 16,
++    borderBottomWidth: 1,
++  },
++  modalTitle: {
++    fontSize: 18,
++    fontWeight: 'bold',
++  },
++  backButton: {
++    padding: 4,
++    minWidth: 32,
++    minHeight: 32,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  originalPost: {
++    margin: 16,
++    borderRadius: 12,
++    borderLeftWidth: 4,
++  },
++  originalPostText: {
++    fontSize: 16,
++    lineHeight: 24,
++    padding: 12,
++  },
++  commentsList: {
++    padding: 16,
++    paddingBottom: 80,
++  },
++  commentsCount: {
++    fontSize: 14,
++    marginBottom: 12,
++  },
++  commentItem: {
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 12,
++    borderLeftWidth: 3,
++  },
++  commentHeader: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    marginBottom: 8,
++  },
++  commentUser: {
++    flexDirection: 'row',
++    alignItems: 'center',
++  },
++  smallAvatarCircle: {
++    width: 24,
++    height: 24,
++    borderRadius: 12,
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginRight: 8,
++  },
++  smallAvatarText: {
++    color: 'white',
++    fontSize: 12,
++    fontWeight: 'bold',
++  },
++  commentAuthor: {
++    fontWeight: '600',
++    fontSize: 14,
++  },
++  commentText: {
++    fontSize: 15,
++    lineHeight: 22,
++  },
++  commentDate: {
++    fontSize: 12,
++    marginTop: 8,
++    textAlign: 'right',
++  },
++  emptyCommentsContainer: {
++    alignItems: 'center',
++    paddingVertical: 30,
++  },
++  emptyCommentsText: {
++    marginTop: 8,
++    textAlign: 'center',
++  },
++  commentInputContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    padding: 12,
++    borderTopWidth: 1,
++    position: 'absolute',
++    bottom: 0,
++    left: 0,
++    right: 0,
++  },
++  commentInput: {
++    flex: 1,
++    minHeight: 40,
++    maxHeight: 100,
++    borderWidth: 1,
++    borderRadius: 20,
++    paddingHorizontal: 16,
++    paddingVertical: 8,
++    marginRight: 8,
++  },
++  postButton: {
++    width: 40,
++    height: 40,
++    borderRadius: 20,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  anonymousToggleContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    paddingHorizontal: 16,
++    paddingBottom: 8,
++  },
++  anonymousToggle: {
++    width: 20,
++    height: 20,
++    borderRadius: 4,
++    borderWidth: 2,
++    alignItems: 'center',
++    justifyContent: 'center',
++    marginRight: 8,
++  },
++  anonymousLabel: {
++    fontSize: 14,
++  },
++  charCount: {
++    fontSize: 12,
++    textAlign: 'right',
++    paddingHorizontal: 16,
++    paddingBottom: 8,
++  },
++});
++
++export default CommunityBoard;
+diff --git a/src/screens/BiblicalDiscussions.tsx b/src/screens/BiblicalDiscussions.tsx
+index 3070febf..38d9b71d 100644
+--- a/src/screens/BiblicalDiscussions.tsx
++++ b/src/screens/BiblicalDiscussions.tsx
+@@ -1,970 +1,20 @@
+-import React, { useState, useEffect } from 'react';
+-import {
+-  View,
+-  Text,
+-  StyleSheet,
+-  TextInput,
+-  TouchableOpacity,
+-  FlatList,
+-  Alert,
+-  Modal,
+-  Platform,
+-  ActivityIndicator,
+-  KeyboardAvoidingView,
+-  StatusBar
+-} from 'react-native';
+-import { SafeAreaView } from 'react-native-safe-area-context';
+-import { useFirebase } from '../context/FirebaseContext';
+-import { useTheme } from '../context/ThemeProvider';
+-import {
+-  collection,
+-  addDoc,
+-  onSnapshot,
+-  doc,
+-  deleteDoc,
+-  updateDoc,
+-  writeBatch,
+-  query,
+-  orderBy,
+-  serverTimestamp,
+-  arrayUnion,
+-  arrayRemove,
+-  getDocs,
+-  increment
+-} from 'firebase/firestore';
+-import { Ionicons } from '@expo/vector-icons';
+-import Constants from 'expo-constants';
+-import { validatePrayer, validateComment, LIMITS } from '../utils/inputValidation';
+-
+-interface Comment {
+-  id: string;
+-  text: string;
+-  userId: string;
+-  username: string;
+-  createdAt: any;
+-}
+-
+-interface BiblicalDiscussion {
+-  id: string;
+-  text: string;
+-  userId: string;
+-  username: string;
+-  createdAt: any;
+-  likedBy: string[];
+-  commentCount: number;
+-  topic?: string;
+-}
+-
+-const BiblicalDiscussions: React.FC = () => {
+-  const { user, db, userProfile } = useFirebase();
+-  const { theme } = useTheme();
+-  const [newDiscussion, setNewDiscussion] = useState('');
+-  const [discussions, setDiscussions] = useState<BiblicalDiscussion[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  const [newComment, setNewComment] = useState('');
+-  const [comments, setComments] = useState<Comment[]>([]);
+-  const [modalVisible, setModalVisible] = useState(false);
+-  const [selectedDiscussion, setSelectedDiscussion] = useState<BiblicalDiscussion | null>(null);
+-  const [submitting, setSubmitting] = useState(false);
+-
+-  useEffect(() => {
+-    if (!db || !user) {
+-      setLoading(false);
+-      return;
+-    }
+-
+-    const discussionsCollection = collection(db, 'biblical-discussions');
+-    const discussionsQuery = query(discussionsCollection, orderBy('createdAt', 'desc'));
+-
+-    const unsubscribe = onSnapshot(
+-      discussionsQuery,
+-      (snapshot) => {
+-        const fetchedDiscussions: BiblicalDiscussion[] = [];
+-        snapshot.forEach((doc) => {
+-          const data = doc.data();
+-          fetchedDiscussions.push({
+-            ...data,
+-            id: doc.id,
+-            likedBy: data.likedBy || [],
+-            commentCount: data.commentCount || 0
+-          } as BiblicalDiscussion);
+-        });
+-        setDiscussions(fetchedDiscussions);
+-        setLoading(false);
+-      },
+-      (error) => {
+-        console.error("Error fetching biblical discussions:", error);
+-        setLoading(false);
+-      }
+-    );
+-
+-    return unsubscribe;
+-  }, [db, user]);
+-
+-  useEffect(() => {
+-    // Load comments when a discussion is selected
+-    if (!db || !selectedDiscussion) {
+-      setComments([]);
+-      return;
+-    }
+-
+-    const commentsCollection = collection(db, `biblical-discussions/${selectedDiscussion.id}/comments`);
+-    const commentsQuery = query(commentsCollection, orderBy('createdAt', 'asc'));
+-
+-    const unsubscribe = onSnapshot(
+-      commentsQuery,
+-      (snapshot) => {
+-        const fetchedComments: Comment[] = [];
+-        snapshot.forEach((doc) => {
+-          const data = doc.data();
+-          fetchedComments.push({
+-            ...data,
+-            id: doc.id,
+-          } as Comment);
+-        });
+-        setComments(fetchedComments);
+-      },
+-      (error) => {
+-        console.error("Error fetching comments:", error);
+-      }
+-    );
+-
+-    return unsubscribe;
+-  }, [db, selectedDiscussion]);
+-
+-  const handleAddDiscussion = async () => {
+-    if (!user || !db || !newDiscussion.trim()) return;
+-
+-    // Validate and sanitize input
+-    const validation = validatePrayer(newDiscussion);
+-    if (!validation.valid) {
+-      Alert.alert("Invalid Input", validation.error);
+-      return;
+-    }
+-
+-    setSubmitting(true);
+-
+-    try {
+-      const batch = writeBatch(db);
+-
+-      const discussionRef = doc(collection(db, 'biblical-discussions'));
+-      batch.set(discussionRef, {
+-        text: validation.sanitized,
+-        userId: user.uid,
+-        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
+-        // Security rules require createdAt == request.time, so this MUST be serverTimestamp()
+-        createdAt: serverTimestamp(),
+-        likedBy: [],
+-        commentCount: 0
+-      });
+-
+-      // Update rate limit atomically with the discussion creation
+-      const rateLimitRef = doc(db, `rateLimits/${user.uid}`);
+-      batch.set(rateLimitRef, { lastActionAt: serverTimestamp() });
+-
+-      await batch.commit();
+-
+-      setNewDiscussion('');
+-    } catch (error) {
+-      Alert.alert("Error", "Failed to add discussion. Please try again.");
+-    } finally {
+-      setSubmitting(false);
+-    }
+-  };
+-
+-  const handleDeleteDiscussion = async (discussionId: string, discussionUserId: string) => {
+-    if (!user || !db) return;
+-    
+-    // Only allow deletion if the current user created the discussion
+-    if (user.uid !== discussionUserId) {
+-      Alert.alert("Permission Denied", "You can only delete your own discussions.");
+-      return;
+-    }
+-
+-    Alert.alert(
+-      "Confirm Delete",
+-      "Are you sure you want to delete this discussion? This will also delete all comments.",
+-      [
+-        { text: "Cancel", style: "cancel" },
+-        { 
+-          text: "Delete", 
+-          style: "destructive", 
+-          onPress: async () => {
+-            try {
+-              // First delete all comments
+-              const commentsCollection = collection(db, `biblical-discussions/${discussionId}/comments`);
+-              const commentsSnapshot = await getDocs(commentsCollection);
+-              const deletePromises = commentsSnapshot.docs.map(commentDoc => 
+-                deleteDoc(doc(db, `biblical-discussions/${discussionId}/comments`, commentDoc.id))
+-              );
+-              await Promise.all(deletePromises);
+-              
+-              // Then delete the discussion
+-              const discussionDoc = doc(db, 'biblical-discussions', discussionId);
+-              await deleteDoc(discussionDoc);
+-            } catch (error) {
+-              console.error("Error deleting discussion:", error);
+-              Alert.alert("Error", "Failed to delete discussion. Please try again.");
+-            }
+-          }
+-        }
+-      ]
+-    );
+-  };
+-
+-  const handleToggleLike = async (discussion: BiblicalDiscussion) => {
+-    if (!user || !db) return;
+-    
+-    try {
+-      const discussionDoc = doc(db, 'biblical-discussions', discussion.id);
+-      
+-      // Check if user already liked this discussion
+-      const isLiked = discussion.likedBy.includes(user.uid);
+-      
+-      if (isLiked) {
+-        // Unlike
+-        await updateDoc(discussionDoc, {
+-          likedBy: arrayRemove(user.uid)
+-        });
+-      } else {
+-        // Like
+-        await updateDoc(discussionDoc, {
+-          likedBy: arrayUnion(user.uid)
+-        });
+-      }
+-    } catch (error) {
+-      console.error("Error toggling like:", error);
+-    }
+-  };
+-
+-  const openComments = (discussion: BiblicalDiscussion) => {
+-    setSelectedDiscussion(discussion);
+-    setModalVisible(true);
+-  };
+-
+-  const handleAddComment = async () => {
+-    if (!user || !db || !selectedDiscussion || !newComment.trim()) return;
+-
+-    // Validate and sanitize input
+-    const validation = validateComment(newComment);
+-    if (!validation.valid) {
+-      Alert.alert("Invalid Input", validation.error);
+-      return;
+-    }
+-
+-    setSubmitting(true);
+-
+-    try {
+-      const commentsCollection = collection(db, `biblical-discussions/${selectedDiscussion.id}/comments`);
+-
+-      // Add the comment
+-      await addDoc(commentsCollection, {
+-        text: validation.sanitized,
+-        userId: user.uid,
+-        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
+-        createdAt: serverTimestamp()
+-      });
+-
+-      // Update comment count atomically to avoid race conditions under concurrent use
+-      const discussionDoc = doc(db, 'biblical-discussions', selectedDiscussion.id);
+-      await updateDoc(discussionDoc, {
+-        commentCount: increment(1)
+-      });
+-
+-      setNewComment('');
+-    } catch (error) {
+-      Alert.alert("Error", "Failed to add comment. Please try again.");
+-    } finally {
+-      setSubmitting(false);
+-    }
+-  };
+-
+-  const handleDeleteComment = async (commentId: string, commentUserId: string) => {
+-    if (!user || !db || !selectedDiscussion) return;
+-    
+-    // Only allow deletion if the current user created the comment
+-    if (user.uid !== commentUserId) {
+-      Alert.alert("Permission Denied", "You can only delete your own comments.");
+-      return;
+-    }
+-
+-    try {
+-      // Delete the comment
+-      const commentDoc = doc(db, `biblical-discussions/${selectedDiscussion.id}/comments`, commentId);
+-      await deleteDoc(commentDoc);
+-      
+-      // Update comment count atomically
+-      const discussionDoc = doc(db, 'biblical-discussions', selectedDiscussion.id);
+-      await updateDoc(discussionDoc, {
+-        commentCount: increment(-1)
+-      });
+-    } catch (error) {
+-      console.error("Error deleting comment:", error);
+-    }
+-  };
+-
+-  // Function to format the timestamp
+-  const formatDate = (timestamp: any) => {
+-    if (!timestamp) return '';
+-    
+-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+-    const now = new Date();
+-    const diffTime = Math.abs(now.getTime() - date.getTime());
+-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+-    
+-    if (diffDays === 0) {
+-      return 'Today';
+-    } else if (diffDays === 1) {
+-      return 'Yesterday';
+-    } else if (diffDays < 7) {
+-      return `${diffDays} days ago`;
+-    } else {
+-      return date.toLocaleDateString();
+-    }
+-  };
+-
+-  if (loading) {
+-    return (
+-      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+-        <ActivityIndicator size="large" color={theme.colors.primary} />
+-        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
+-          Loading Biblical Discussions...
+-        </Text>
+-      </View>
+-    );
+-  }
+-
+-  if (!user) {
+-    return (
+-      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+-        <Ionicons name="book-outline" size={48} color={theme.colors.primary} />
+-        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
+-          Please log in to join Biblical Discussions.
+-        </Text>
+-      </View>
+-    );
+-  }
+-
+-  return (
+-    <KeyboardAvoidingView 
+-      style={{ flex: 1 }} 
+-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+-      keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+-    >
+-      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+-        <View style={[styles.header, { backgroundColor: theme.colors.card, ...getShadowStyle(theme) }]}>
+-          <Text style={[styles.title, { color: theme.colors.text }]}>Biblical Discussions</Text>
+-          <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
+-            Share insights, discuss scripture, and grow in faith together
+-          </Text>
+-        </View>
+-        
+-        <View style={[styles.inputContainer, { 
+-          borderColor: theme.colors.border, 
+-          backgroundColor: theme.colors.card,
+-          ...getShadowStyle(theme)
+-        }]}>
+-          <TextInput
+-            style={[styles.input, { color: theme.colors.text }]}
+-            value={newDiscussion}
+-            onChangeText={setNewDiscussion}
+-            placeholder="Share your biblical thoughts, insights, or questions..."
+-            placeholderTextColor={theme.colors.secondary}
+-            multiline
+-            maxLength={LIMITS.PRAYER_MAX_LENGTH}
+-          />
+-          <Text style={[styles.charCount, { color: theme.colors.textSecondary }]}>
+-            {newDiscussion.length}/{LIMITS.PRAYER_MAX_LENGTH}
+-          </Text>
+-          <TouchableOpacity 
+-            style={[
+-              styles.addButton, 
+-              { backgroundColor: theme.colors.primary },
+-              submitting && { opacity: 0.7 }
+-            ]}
+-            onPress={handleAddDiscussion}
+-            disabled={submitting || !newDiscussion.trim()}
+-          >
+-            {submitting ? (
+-              <ActivityIndicator size="small" color="white" />
+-            ) : (
+-              <>
+-                <Ionicons name="add" size={18} color="white" />
+-                <Text style={styles.addButtonText}>Share Discussion</Text>
+-              </>
+-            )}
+-          </TouchableOpacity>
+-        </View>
+-        
+-        <FlatList
+-          data={discussions}
+-          keyExtractor={(item) => item.id}
+-          contentContainerStyle={styles.listContent}
+-          showsVerticalScrollIndicator={false}
+-          renderItem={({ item }) => (
+-            <View style={[
+-              styles.discussionItem, 
+-              { 
+-                backgroundColor: theme.colors.card,
+-                borderColor: theme.colors.border,
+-                ...getShadowStyle(theme)
+-              }
+-            ]}>
+-              <View style={styles.discussionHeader}>
+-                <View style={styles.userInfo}>
+-                  <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
+-                    <Text style={styles.avatarText}>
+-                      {(item.username || 'U')[0].toUpperCase()}
+-                    </Text>
+-                  </View>
+-                  <View>
+-                    <Text style={[styles.username, { color: theme.colors.text }]}>
+-                      {item.username || 'User'}
+-                    </Text>
+-                    <Text style={[styles.discussionDate, { color: theme.colors.textSecondary }]}>
+-                      {formatDate(item.createdAt)}
+-                    </Text>
+-                  </View>
+-                </View>
+-              </View>
+-              
+-              <Text style={[styles.discussionText, { color: theme.colors.text }]}>
+-                {item.text}
+-              </Text>
+-              
+-              <View style={[styles.interactionBar, { borderTopColor: theme.colors.divider }]}>
+-                <TouchableOpacity 
+-                  style={styles.interactionButton} 
+-                  onPress={() => handleToggleLike(item)}
+-                >
+-                  <Ionicons 
+-                    name={item.likedBy.includes(user.uid) ? "heart" : "heart-outline"} 
+-                    size={20} 
+-                    color={item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary} 
+-                  />
+-                  <Text style={[
+-                    styles.interactionText,
+-                    { color: item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary }
+-                  ]}>
+-                    {item.likedBy.length}
+-                  </Text>
+-                </TouchableOpacity>
+-                
+-                <TouchableOpacity 
+-                  style={styles.interactionButton}
+-                  onPress={() => openComments(item)}
+-                >
+-                  <Ionicons 
+-                    name="chatbubble-outline" 
+-                    size={18} 
+-                    color={theme.colors.textSecondary} 
+-                  />
+-                  <Text style={[styles.interactionText, { color: theme.colors.textSecondary }]}>
+-                    {item.commentCount || 0}
+-                  </Text>
+-                </TouchableOpacity>
+-              </View>
+-              
+-              {user.uid === item.userId && (
+-                <View style={[styles.ownerActions, { borderTopColor: theme.colors.divider }]}>
+-                  <TouchableOpacity
+-                    style={[styles.ownerActionButton, { backgroundColor: `${theme.colors.danger}15` }]}
+-                    onPress={() => handleDeleteDiscussion(item.id, item.userId)}
+-                  >
+-                    <Ionicons 
+-                      name="trash-outline" 
+-                      size={18} 
+-                      color={theme.colors.danger} 
+-                    />
+-                    <Text style={[styles.ownerActionText, { color: theme.colors.danger }]}>
+-                      Delete
+-                    </Text>
+-                  </TouchableOpacity>
+-                </View>
+-              )}
+-            </View>
+-          )}
+-          ListEmptyComponent={
+-            <View style={styles.emptyContainer}>
+-              <Ionicons name="book-outline" size={64} color={theme.colors.secondary} />
+-              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+-                No discussions yet
+-              </Text>
+-              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+-                Be the first to share a biblical discussion
+-              </Text>
+-            </View>
+-          }
+-        />
+-        
+-        {/* Comments Modal */}
+-        <Modal
+-          animationType="slide"
+-          transparent={false}
+-          visible={modalVisible}
+-          onRequestClose={() => setModalVisible(false)}
+-        >
+-          <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+-            <StatusBar 
+-              backgroundColor={theme.colors.card} 
+-              barStyle={theme.name === 'dark' ? 'light-content' : 'dark-content'}
+-            />
+-            <View style={[styles.modalHeader, { 
+-              backgroundColor: theme.colors.card,
+-              borderBottomColor: theme.colors.divider,
+-              paddingTop: Platform.OS === 'ios' ? 50 : Constants.statusBarHeight + 5,
+-              ...getShadowStyle(theme)
+-            }]}>
+-              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.backButton}>
+-                <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
+-              </TouchableOpacity>
+-              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
+-              <View style={{ width: 24 }} />
+-            </View>
+-            
+-            <KeyboardAvoidingView 
+-              style={{ flex: 1 }} 
+-              behavior={Platform.OS === "ios" ? "padding" : undefined}
+-            >
+-              
+-              {selectedDiscussion && (
+-                <View style={[
+-                  styles.originalDiscussion, 
+-                  { 
+-                    backgroundColor: theme.colors.card,
+-                    borderLeftColor: theme.colors.primary,
+-                    ...getShadowStyle(theme)
+-                  }
+-                ]}>
+-                  <View style={styles.discussionHeader}>
+-                    <View style={styles.userInfo}>
+-                      <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
+-                        <Text style={styles.avatarText}>
+-                          {(selectedDiscussion.username || 'U')[0].toUpperCase()}
+-                        </Text>
+-                      </View>
+-                      <View>
+-                        <Text style={[styles.username, { color: theme.colors.text }]}>
+-                          {selectedDiscussion.username || 'User'}
+-                        </Text>
+-                        <Text style={[styles.discussionDate, { color: theme.colors.textSecondary }]}>
+-                          {formatDate(selectedDiscussion.createdAt)}
+-                        </Text>
+-                      </View>
+-                    </View>
+-                  </View>
+-                  <Text style={[styles.originalDiscussionText, { color: theme.colors.text }]}>
+-                    {selectedDiscussion.text}
+-                  </Text>
+-                </View>
+-              )}
+-              
+-              <FlatList
+-                data={comments}
+-                keyExtractor={(item) => item.id}
+-                contentContainerStyle={styles.commentsList}
+-                ListHeaderComponent={
+-                  comments.length > 0 ? (
+-                    <Text style={[styles.commentsCount, { color: theme.colors.textSecondary }]}>
+-                      {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
+-                    </Text>
+-                  ) : null
+-                }
+-                renderItem={({ item }) => (
+-                  <View style={[
+-                    styles.commentItem, 
+-                    { 
+-                      backgroundColor: user?.uid === item.userId 
+-                        ? `${theme.colors.primary}15` 
+-                        : theme.colors.card,
+-                      borderLeftColor: user?.uid === item.userId 
+-                        ? theme.colors.primary 
+-                        : theme.colors.border
+-                    }
+-                  ]}>
+-                    <View style={styles.commentHeader}>
+-                      <View style={styles.commentUser}>
+-                        <View style={[
+-                          styles.smallAvatarCircle, 
+-                          { 
+-                            backgroundColor: user?.uid === item.userId 
+-                              ? theme.colors.primary 
+-                              : theme.colors.secondary
+-                          }
+-                        ]}>
+-                          <Text style={styles.smallAvatarText}>
+-                            {(item.username || 'U')[0].toUpperCase()}
+-                          </Text>
+-                        </View>
+-                        <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
+-                          {item.username || 'User'}
+-                        </Text>
+-                      </View>
+-                      
+-                      {user?.uid === item.userId && (
+-                        <TouchableOpacity
+-                          onPress={() => handleDeleteComment(item.id, item.userId)}
+-                        >
+-                          <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
+-                        </TouchableOpacity>
+-                      )}
+-                    </View>
+-                    <Text style={[styles.commentText, { color: theme.colors.text }]}>
+-                      {item.text}
+-                    </Text>
+-                    <Text style={[styles.commentDate, { color: theme.colors.textSecondary }]}>
+-                      {formatDate(item.createdAt)}
+-                    </Text>
+-                  </View>
+-                )}
+-                ListEmptyComponent={
+-                  <View style={styles.emptyCommentsContainer}>
+-                    <Ionicons name="chatbubble-outline" size={40} color={theme.colors.secondary} />
+-                    <Text style={[styles.emptyCommentsText, { color: theme.colors.textSecondary }]}>
+-                      No comments yet. Be the first to comment!
+-                    </Text>
+-                  </View>
+-                }
+-              />
+-              
+-              <View style={[
+-                styles.commentInputContainer, 
+-                { 
+-                  borderTopColor: theme.colors.divider,
+-                  backgroundColor: theme.colors.card
+-                }
+-              ]}>
+-                <TextInput
+-                  style={[
+-                    styles.commentInput, 
+-                    { 
+-                      backgroundColor: theme.colors.background, 
+-                      borderColor: theme.colors.border,
+-                      color: theme.colors.text 
+-                    }
+-                  ]}
+-                  value={newComment}
+-                  onChangeText={setNewComment}
+-                  placeholder="Write a thoughtful response..."
+-                  placeholderTextColor={theme.colors.secondary}
+-                  multiline
+-                  maxLength={500}
+-                />
+-                <TouchableOpacity 
+-                  style={[
+-                    styles.postButton, 
+-                    { backgroundColor: theme.colors.primary },
+-                    (submitting || !newComment.trim()) && { opacity: 0.5 }
+-                  ]}
+-                  onPress={handleAddComment}
+-                  disabled={submitting || !newComment.trim()}
+-                >
+-                  {submitting ? (
+-                    <ActivityIndicator size="small" color="white" />
+-                  ) : (
+-                    <Ionicons name="send" size={20} color="white" />
+-                  )}
+-                </TouchableOpacity>
+-              </View>
+-            </KeyboardAvoidingView>
+-          </View>
+-        </Modal>
+-      </View>
+-    </KeyboardAvoidingView>
+-  );
+-};
+-
+-// Helper function for consistent shadow styling
+-const getShadowStyle = (theme: any) => {
+-  if (Platform.OS === 'ios') {
+-      return {
+-          shadowColor: theme.colors.shadow,
+-          shadowOffset: { width: 0, height: 2 },
+-          shadowOpacity: 0.8,
+-          shadowRadius: 3,
+-      };
+-  } else {
+-      return {
+-          elevation: 3,
+-      };
+-  }
++import React from 'react';
++import CommunityBoard, { CommunityBoardConfig } from '../components/community/CommunityBoard';
++
++const config: CommunityBoardConfig = {
++  collectionName: 'biblical-discussions',
++  itemNoun: 'discussion',
++  title: 'Biblical Discussions',
++  subtitle: 'Share insights, discuss scripture, and grow in faith together',
++  inputPlaceholder: 'Share your biblical thoughts, insights, or questions...',
++  addButtonLabel: 'Share Discussion',
++  loadingText: 'Loading Biblical Discussions...',
++  loginPromptText: 'Please log in to join Biblical Discussions.',
++  emptyTitle: 'No discussions yet',
++  emptySubtitle: 'Be the first to share a biblical discussion',
++  emptyIcon: 'book-outline',
+ };
+ 
+-const styles = StyleSheet.create({
+-  container: {
+-    flex: 1,
+-  },
+-  centerContainer: {
+-    flex: 1,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    padding: 16,
+-  },
+-  header: {
+-    padding: 16,
+-    borderRadius: 0,
+-    marginBottom: 16,
+-  },
+-  title: {
+-    fontSize: 24,
+-    fontWeight: 'bold',
+-    textAlign: 'center',
+-  },
+-  subtitle: {
+-    fontSize: 14,
+-    textAlign: 'center',
+-    marginTop: 4,
+-  },
+-  inputContainer: {
+-    marginHorizontal: 16,
+-    marginBottom: 16,
+-    borderRadius: 12,
+-    borderWidth: 0,
+-  },
+-  input: {
+-    padding: 16,
+-    fontSize: 16,
+-    minHeight: 100,
+-    maxHeight: 150,
+-    textAlignVertical: 'top',
+-  },
+-  addButton: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    padding: 12,
+-    borderRadius: 8,
+-    margin: 8,
+-  },
+-  addButtonText: {
+-    color: 'white',
+-    fontWeight: '600',
+-    marginLeft: 8,
+-  },
+-  listContent: {
+-    paddingHorizontal: 16,
+-    paddingBottom: 24
+-  },
+-  discussionItem: {
+-    borderRadius: 12,
+-    marginBottom: 16,
+-    borderWidth: 0,
+-    overflow: 'hidden',
+-  },
+-  discussionHeader: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    alignItems: 'center',
+-    padding: 12,
+-  },
+-  userInfo: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-  },
+-  avatarCircle: {
+-    width: 36,
+-    height: 36,
+-    borderRadius: 18,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    marginRight: 10,
+-  },
+-  avatarText: {
+-    color: 'white',
+-    fontSize: 16,
+-    fontWeight: 'bold',
+-  },
+-  username: {
+-    fontSize: 14,
+-    fontWeight: '600',
+-  },
+-  discussionDate: {
+-    fontSize: 12,
+-  },
+-  discussionText: {
+-    fontSize: 16,
+-    lineHeight: 24,
+-    paddingHorizontal: 12,
+-    paddingBottom: 16,
+-  },
+-  interactionBar: {
+-    flexDirection: 'row',
+-    borderTopWidth: 1,
+-    paddingVertical: 8,
+-    paddingHorizontal: 12,
+-  },
+-  interactionButton: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    marginRight: 20,
+-  },
+-  interactionText: {
+-    marginLeft: 4,
+-    fontSize: 14,
+-  },
+-  ownerActions: {
+-    flexDirection: 'row',
+-    justifyContent: 'center',
+-    padding: 8,
+-    borderTopWidth: 1,
+-  },
+-  ownerActionButton: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    paddingVertical: 8,
+-    paddingHorizontal: 12,
+-    borderRadius: 8,
+-    flex: 0.48,
+-  },
+-  ownerActionText: {
+-    marginLeft: 8,
+-    fontSize: 14,
+-    fontWeight: '500',
+-  },
+-  message: {
+-    padding: 20,
+-    textAlign: 'center',
+-    fontSize: 16,
+-  },
+-  emptyContainer: {
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    padding: 40,
+-    marginTop: 20,
+-  },
+-  emptyTitle: {
+-    fontSize: 18,
+-    fontWeight: 'bold',
+-    marginTop: 16,
+-  },
+-  emptySubtitle: {
+-    fontSize: 14,
+-    marginTop: 8,
+-    textAlign: 'center',
+-  },
+-  modalContainer: {
+-    flex: 1,
+-  },
+-  modalHeader: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    alignItems: 'center',
+-    padding: 16,
+-    borderBottomWidth: 1,
+-  },
+-  modalTitle: {
+-    fontSize: 18,
+-    fontWeight: 'bold',
+-  },
+-  backButton: {
+-    padding: 4,
+-    minWidth: 32,
+-    minHeight: 32,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  originalDiscussion: {
+-    margin: 16,
+-    borderRadius: 12,
+-    borderLeftWidth: 4,
+-  },
+-  originalDiscussionText: {
+-    fontSize: 16,
+-    lineHeight: 24,
+-    padding: 12,
+-  },
+-  commentsList: {
+-    padding: 16,
+-    paddingBottom: 80,
+-  },
+-  commentsCount: {
+-    fontSize: 14,
+-    marginBottom: 12,
+-  },
+-  commentItem: {
+-    padding: 12,
+-    borderRadius: 8,
+-    marginBottom: 12,
+-    borderLeftWidth: 3,
+-  },
+-  commentHeader: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    alignItems: 'center',
+-    marginBottom: 8,
+-  },
+-  commentUser: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-  },
+-  smallAvatarCircle: {
+-    width: 24,
+-    height: 24,
+-    borderRadius: 12,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    marginRight: 8,
+-  },
+-  smallAvatarText: {
+-    color: 'white',
+-    fontSize: 12,
+-    fontWeight: 'bold',
+-  },
+-  commentAuthor: {
+-    fontWeight: '600',
+-    fontSize: 14,
+-  },
+-  commentText: {
+-    fontSize: 15,
+-    lineHeight: 22,
+-  },
+-  commentDate: {
+-    fontSize: 12,
+-    marginTop: 8,
+-    textAlign: 'right',
+-  },
+-  emptyCommentsContainer: {
+-    alignItems: 'center',
+-    paddingVertical: 30,
+-  },
+-  emptyCommentsText: {
+-    marginTop: 8,
+-    textAlign: 'center',
+-  },
+-  commentInputContainer: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    padding: 12,
+-    borderTopWidth: 1,
+-    position: 'absolute',
+-    bottom: 0,
+-    left: 0,
+-    right: 0,
+-  },
+-  commentInput: {
+-    flex: 1,
+-    minHeight: 40,
+-    maxHeight: 100,
+-    borderWidth: 1,
+-    borderRadius: 20,
+-    paddingHorizontal: 16,
+-    paddingVertical: 8,
+-    marginRight: 8,
+-  },
+-  postButton: {
+-    width: 40,
+-    height: 40,
+-    borderRadius: 20,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  charCount: {
+-    fontSize: 12,
+-    textAlign: 'right',
+-    paddingHorizontal: 16,
+-    paddingBottom: 8,
+-  },
+-});
++const BiblicalDiscussions: React.FC = () => <CommunityBoard config={config} />;
+ 
+-export default BiblicalDiscussions;
+\ No newline at end of file
++export default BiblicalDiscussions;
+diff --git a/src/screens/PrayerBoard.tsx b/src/screens/PrayerBoard.tsx
+index 706cbf61..1cb33dc7 100644
+--- a/src/screens/PrayerBoard.tsx
++++ b/src/screens/PrayerBoard.tsx
+@@ -1,1114 +1,22 @@
+-import React, { useState, useEffect } from 'react';
+-import {
+-  View,
+-  Text,
+-  StyleSheet,
+-  TextInput,
+-  TouchableOpacity,
+-  FlatList,
+-  Alert,
+-  Modal,
+-  Platform,
+-  ActivityIndicator,
+-  KeyboardAvoidingView,
+-  StatusBar
+-} from 'react-native';
+-import { SafeAreaView } from 'react-native-safe-area-context';
+-import { useFirebase } from '../context/FirebaseContext';
+-import { useTheme } from '../context/ThemeProvider';
+-import {
+-  collection,
+-  addDoc,
+-  onSnapshot,
+-  doc,
+-  deleteDoc,
+-  updateDoc,
+-  writeBatch,
+-  query,
+-  orderBy,
+-  serverTimestamp,
+-  arrayUnion,
+-  arrayRemove,
+-  getDocs,
+-  increment
+-} from 'firebase/firestore';
+-import { Ionicons } from '@expo/vector-icons';
+-import Constants from 'expo-constants';
+-import { validatePrayer, validateComment, LIMITS } from '../utils/inputValidation';
+-
+-interface Comment {
+-  id: string;
+-  text: string;
+-  userId: string;
+-  username: string;
+-  createdAt: any;
+-}
+-
+-interface PrayerRequest {
+-  id: string;
+-  text: string;
+-  userId: string;
+-  username: string;
+-  createdAt: any;
+-  answered: boolean;
+-  likedBy: string[];
+-  commentCount: number;
+-  isAnonymous?: boolean;
+-}
+-
+-const PrayerBoard: React.FC = () => {
+-  const { user, db, userProfile } = useFirebase();
+-  const { theme } = useTheme();
+-  const [newPrayer, setNewPrayer] = useState('');
+-  const [prayers, setPrayers] = useState<PrayerRequest[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  const [newComment, setNewComment] = useState('');
+-  const [comments, setComments] = useState<Comment[]>([]);
+-  const [modalVisible, setModalVisible] = useState(false);
+-  const [selectedPrayer, setSelectedPrayer] = useState<PrayerRequest | null>(null);
+-  const [submitting, setSubmitting] = useState(false);
+-  const [isAnonymous, setIsAnonymous] = useState(false);
+-  const [ownedPrayerIds, setOwnedPrayerIds] = useState<Set<string>>(new Set());
+-
+-  useEffect(() => {
+-    if (!db || !user) {
+-      setLoading(false);
+-      return;
+-    }
+-
+-    const prayersCollection = collection(db, 'prayers');
+-    const prayersQuery = query(prayersCollection, orderBy('createdAt', 'desc'));
+-
+-    const unsubscribe = onSnapshot(
+-      prayersQuery,
+-      (snapshot) => {
+-        const fetchedPrayers: PrayerRequest[] = [];
+-        snapshot.forEach((doc) => {
+-          const data = doc.data();
+-          fetchedPrayers.push({
+-            ...data,
+-            id: doc.id,
+-            likedBy: data.likedBy || [],
+-            commentCount: data.commentCount || 0
+-          } as PrayerRequest);
+-        });
+-        setPrayers(fetchedPrayers);
+-        setLoading(false);
+-      },
+-      (error) => {
+-        console.error("Error fetching prayer requests:", error);
+-        setLoading(false);
+-      }
+-    );
+-
+-    return unsubscribe;
+-  }, [db, user]);
+-
+-  // Subscribe to the private ownership subcollection so we can show owner controls
+-  // on anonymous prayers the current user created without exposing userId publicly.
+-  useEffect(() => {
+-    if (!db || !user) {
+-      setOwnedPrayerIds(new Set());
+-      return;
+-    }
+-
+-    const ownedCollection = collection(db, `users/${user.uid}/ownedPrayers`);
+-    const unsubscribe = onSnapshot(
+-      ownedCollection,
+-      (snapshot) => {
+-        const ids = new Set<string>();
+-        snapshot.forEach((d) => ids.add(d.id));
+-        setOwnedPrayerIds(ids);
+-      },
+-      (error) => {
+-        console.error('Error fetching owned prayers:', error);
+-      }
+-    );
+-
+-    return unsubscribe;
+-  }, [db, user]);
+-
+-  useEffect(() => {
+-    // Load comments when a prayer is selected
+-    if (!db || !selectedPrayer) {
+-      setComments([]);
+-      return;
+-    }
+-
+-    const commentsCollection = collection(db, `prayers/${selectedPrayer.id}/comments`);
+-    const commentsQuery = query(commentsCollection, orderBy('createdAt', 'asc'));
+-
+-    const unsubscribe = onSnapshot(
+-      commentsQuery,
+-      (snapshot) => {
+-        const fetchedComments: Comment[] = [];
+-        snapshot.forEach((doc) => {
+-          const data = doc.data();
+-          fetchedComments.push({
+-            ...data,
+-            id: doc.id,
+-          } as Comment);
+-        });
+-        setComments(fetchedComments);
+-      },
+-      (error) => {
+-        console.error("Error fetching comments:", error);
+-      }
+-    );
+-
+-    return unsubscribe;
+-  }, [db, selectedPrayer]);
+-
+-  const handleAddPrayer = async () => {
+-    if (!user || !db || !newPrayer.trim()) return;
+-
+-    // Validate and sanitize input
+-    const validation = validatePrayer(newPrayer);
+-    if (!validation.valid) {
+-      Alert.alert("Invalid Input", validation.error);
+-      return;
+-    }
+-
+-    setSubmitting(true);
+-
+-    try {
+-      const batch = writeBatch(db);
+-
+-      // Pre-generate the prayer document reference so we can reference its ID
+-      const prayerRef = doc(collection(db, 'prayers'));
+-      batch.set(prayerRef, {
+-        text: validation.sanitized,
+-        // For anonymous posts userId and username are omitted from the public document
+-        // to prevent de-anonymisation via direct Firestore reads.
+-        userId: isAnonymous ? null : user.uid,
+-        username: isAnonymous ? 'Anonymous' : (userProfile?.username || `User_${user.uid.substring(0, 5)}`),
+-        // Security rules require createdAt == request.time, so this MUST be serverTimestamp()
+-        createdAt: serverTimestamp(),
+-        answered: false,
+-        likedBy: [],
+-        commentCount: 0,
+-        isAnonymous: isAnonymous
+-      });
+-
+-      // Update rate limit atomically with the prayer creation.
+-      // Security rules REQUIRE this write in the same batch (updatesRateLimit),
+-      // and only allow lastActionAt == request.time, so the cooldown cannot be
+-      // bypassed or reset with a fake timestamp.
+-      const rateLimitRef = doc(db, `rateLimits/${user.uid}`);
+-      batch.set(rateLimitRef, { lastActionAt: serverTimestamp() });
+-
+-      if (isAnonymous) {
+-        // The private ownership record MUST be created in the same batch as the
+-        // prayer — security rules enforce this atomicity, which both prevents
+-        // orphaned anonymous prayers and blocks other users from ever claiming
+-        // ownership of an existing anonymous prayer.
+-        const ownerDoc = doc(db, `users/${user.uid}/ownedPrayers`, prayerRef.id);
+-        batch.set(ownerDoc, { prayerId: prayerRef.id, createdAt: serverTimestamp() });
+-      }
+-
+-      await batch.commit();
+-
+-      setNewPrayer('');
+-      setIsAnonymous(false);
+-    } catch (error) {
+-      Alert.alert("Error", "Failed to add prayer request. Please try again.");
+-    } finally {
+-      setSubmitting(false);
+-    }
+-  };
+-
+-  const handleToggleAnswered = async (prayerId: string, currentAnswered: boolean) => {
+-    if (!db) return;
+-    
+-    try {
+-      const prayerDoc = doc(db, 'prayers', prayerId);
+-      await updateDoc(prayerDoc, {
+-        answered: !currentAnswered,
+-      });
+-    } catch (error) {
+-      console.error("Error updating prayer request:", error);
+-    }
+-  };
+-
+-  const handleDeletePrayer = async (prayer: PrayerRequest) => {
+-    if (!user || !db) return;
+-
+-    const canDelete = prayer.userId === user.uid || ownedPrayerIds.has(prayer.id);
+-    if (!canDelete) {
+-      Alert.alert("Permission Denied", "You can only delete your own prayer requests.");
+-      return;
+-    }
+-
+-    Alert.alert(
+-      "Confirm Delete",
+-      "Are you sure you want to delete this prayer request? This will also delete all comments.",
+-      [
+-        { text: "Cancel", style: "cancel" },
+-        {
+-          text: "Delete",
+-          style: "destructive",
+-          onPress: async () => {
+-            try {
+-              // First delete all comments
+-              const commentsCollection = collection(db, `prayers/${prayer.id}/comments`);
+-              const commentsSnapshot = await getDocs(commentsCollection);
+-              const deletePromises = commentsSnapshot.docs.map(commentDoc =>
+-                deleteDoc(doc(db, `prayers/${prayer.id}/comments`, commentDoc.id))
+-              );
+-              await Promise.all(deletePromises);
+-
+-              // Then delete the prayer request
+-              const prayerDoc = doc(db, 'prayers', prayer.id);
+-              await deleteDoc(prayerDoc);
+-
+-              // Clean up the private ownership record for anonymous prayers
+-              if (prayer.isAnonymous) {
+-                const ownerDoc = doc(db, `users/${user.uid}/ownedPrayers`, prayer.id);
+-                await deleteDoc(ownerDoc);
+-              }
+-            } catch (error) {
+-              console.error("Error deleting prayer request:", error);
+-              Alert.alert("Error", "Failed to delete prayer request. Please try again.");
+-            }
+-          }
+-        }
+-      ]
+-    );
+-  };
+-
+-  const handleToggleLike = async (prayer: PrayerRequest) => {
+-    if (!user || !db) return;
+-    
+-    try {
+-      const prayerDoc = doc(db, 'prayers', prayer.id);
+-      
+-      // Check if user already liked this prayer
+-      const isLiked = prayer.likedBy.includes(user.uid);
+-      
+-      if (isLiked) {
+-        // Unlike
+-        await updateDoc(prayerDoc, {
+-          likedBy: arrayRemove(user.uid)
+-        });
+-      } else {
+-        // Like
+-        await updateDoc(prayerDoc, {
+-          likedBy: arrayUnion(user.uid)
+-        });
+-      }
+-    } catch (error) {
+-      console.error("Error toggling like:", error);
+-    }
+-  };
+-
+-  const openComments = (prayer: PrayerRequest) => {
+-    setSelectedPrayer(prayer);
+-    setModalVisible(true);
+-  };
+-
+-  const handleAddComment = async () => {
+-    if (!user || !db || !selectedPrayer || !newComment.trim()) return;
+-
+-    // Validate and sanitize input
+-    const validation = validateComment(newComment);
+-    if (!validation.valid) {
+-      Alert.alert("Invalid Input", validation.error);
+-      return;
+-    }
+-
+-    setSubmitting(true);
+-
+-    try {
+-      const commentsCollection = collection(db, `prayers/${selectedPrayer.id}/comments`);
+-
+-      // Add the comment
+-      await addDoc(commentsCollection, {
+-        text: validation.sanitized,
+-        userId: user.uid,
+-        username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
+-        createdAt: serverTimestamp()
+-      });
+-
+-      // Update comment count atomically to avoid race conditions under concurrent use
+-      const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
+-      await updateDoc(prayerDoc, {
+-        commentCount: increment(1)
+-      });
+-
+-      setNewComment('');
+-    } catch (error) {
+-      Alert.alert("Error", "Failed to add comment. Please try again.");
+-    } finally {
+-      setSubmitting(false);
+-    }
+-  };
+-
+-  const handleDeleteComment = async (commentId: string, commentUserId: string) => {
+-    if (!user || !db || !selectedPrayer) return;
+-    
+-    // Only allow deletion if the current user created the comment
+-    if (user.uid !== commentUserId) {
+-      Alert.alert("Permission Denied", "You can only delete your own comments.");
+-      return;
+-    }
+-
+-    try {
+-      // Delete the comment
+-      const commentDoc = doc(db, `prayers/${selectedPrayer.id}/comments`, commentId);
+-      await deleteDoc(commentDoc);
+-      
+-      // Update comment count atomically
+-      const prayerDoc = doc(db, 'prayers', selectedPrayer.id);
+-      await updateDoc(prayerDoc, {
+-        commentCount: increment(-1)
+-      });
+-    } catch (error) {
+-      console.error("Error deleting comment:", error);
+-    }
+-  };
+-
+-  // Function to format the timestamp
+-  const formatDate = (timestamp: any) => {
+-    if (!timestamp) return '';
+-    
+-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+-    const now = new Date();
+-    const diffTime = Math.abs(now.getTime() - date.getTime());
+-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+-    
+-    if (diffDays === 0) {
+-      return 'Today';
+-    } else if (diffDays === 1) {
+-      return 'Yesterday';
+-    } else if (diffDays < 7) {
+-      return `${diffDays} days ago`;
+-    } else {
+-      return date.toLocaleDateString();
+-    }
+-  };
+-
+-  if (loading) {
+-    return (
+-      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+-        <ActivityIndicator size="large" color={theme.colors.primary} />
+-        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
+-          Loading Prayer Board...
+-        </Text>
+-      </View>
+-    );
+-  }
+-
+-  if (!user) {
+-    return (
+-      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+-        <Ionicons name="person-circle-outline" size={48} color={theme.colors.primary} />
+-        <Text style={[styles.message, { color: theme.colors.text, marginTop: 16 }]}>
+-          Please log in to use the Prayer Board.
+-        </Text>
+-      </View>
+-    );
+-  }
+-
+-  return (
+-    <KeyboardAvoidingView 
+-      style={{ flex: 1 }} 
+-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+-      keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
+-    >
+-      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+-        <View style={[styles.header, { backgroundColor: theme.colors.card, ...getShadowStyle(theme) }]}>
+-          <Text style={[styles.title, { color: theme.colors.text }]}>Prayer Board</Text>
+-          <Text style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
+-            Share your prayer requests and support others
+-          </Text>
+-        </View>
+-        
+-        <View style={[styles.inputContainer, { 
+-          borderColor: theme.colors.border, 
+-          backgroundColor: theme.colors.card,
+-          ...getShadowStyle(theme)
+-        }]}>
+-          <TextInput
+-            style={[styles.input, { color: theme.colors.text }]}
+-            value={newPrayer}
+-            onChangeText={setNewPrayer}
+-            placeholder="Enter your prayer request..."
+-            placeholderTextColor={theme.colors.secondary}
+-            multiline
+-            maxLength={LIMITS.PRAYER_MAX_LENGTH}
+-          />
+-          <Text style={[styles.charCount, { color: theme.colors.textSecondary }]}>
+-            {newPrayer.length}/{LIMITS.PRAYER_MAX_LENGTH}
+-          </Text>
+-          
+-          <View style={styles.anonymousToggleContainer}>
+-            <TouchableOpacity
+-              style={[styles.anonymousToggle, {
+-                backgroundColor: isAnonymous ? theme.colors.primary : 'transparent',
+-                borderColor: theme.colors.primary
+-              }]}
+-              onPress={() => setIsAnonymous(!isAnonymous)}
+-            >
+-              {isAnonymous && (
+-                <Ionicons name="checkmark" size={16} color="white" />
+-              )}
+-            </TouchableOpacity>
+-            <Text style={[styles.anonymousLabel, { color: theme.colors.text }]}>
+-              Post anonymously
+-            </Text>
+-          </View>
+-          <TouchableOpacity 
+-            style={[
+-              styles.addButton, 
+-              { backgroundColor: theme.colors.primary },
+-              submitting && { opacity: 0.7 }
+-            ]}
+-            onPress={handleAddPrayer}
+-            disabled={submitting || !newPrayer.trim()}
+-          >
+-            {submitting ? (
+-              <ActivityIndicator size="small" color="white" />
+-            ) : (
+-              <>
+-                <Ionicons name="add" size={18} color="white" />
+-                <Text style={styles.addButtonText}>Add Prayer</Text>
+-              </>
+-            )}
+-          </TouchableOpacity>
+-        </View>
+-        
+-        <FlatList
+-          data={prayers}
+-          keyExtractor={(item) => item.id}
+-          contentContainerStyle={styles.listContent}
+-          showsVerticalScrollIndicator={false}
+-          renderItem={({ item }) => (
+-            <View style={[
+-              styles.prayerItem, 
+-              { 
+-                backgroundColor: theme.colors.card,
+-                borderColor: theme.colors.border,
+-                ...getShadowStyle(theme)
+-              },
+-              item.answered && [styles.answeredPrayer, { borderColor: theme.colors.success }]
+-            ]}>
+-              <View style={styles.prayerHeader}>
+-                <View style={styles.userInfo}>
+-                  <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
+-                    <Text style={styles.avatarText}>
+-                      {item.isAnonymous ? '?' : (item.username || 'U')[0].toUpperCase()}
+-                    </Text>
+-                  </View>
+-                  <View>
+-                    <Text style={[styles.username, { color: theme.colors.text }]}>
+-                      {item.isAnonymous ? 'Anonymous' : (item.username || 'User')}
+-                    </Text>
+-                    <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
+-                      {formatDate(item.createdAt)}
+-                    </Text>
+-                  </View>
+-                </View>
+-                
+-                {item.answered && (
+-                  <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
+-                    <Text style={styles.answeredText}>Answered</Text>
+-                  </View>
+-                )}
+-              </View>
+-              
+-              <Text style={[styles.prayerText, { color: theme.colors.text }]}>
+-                {item.text}
+-              </Text>
+-              
+-              <View style={[styles.interactionBar, { borderTopColor: theme.colors.divider }]}>
+-                <TouchableOpacity 
+-                  style={styles.interactionButton} 
+-                  onPress={() => handleToggleLike(item)}
+-                >
+-                  <Ionicons 
+-                    name={item.likedBy.includes(user.uid) ? "heart" : "heart-outline"} 
+-                    size={20} 
+-                    color={item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary} 
+-                  />
+-                  <Text style={[
+-                    styles.interactionText,
+-                    { color: item.likedBy.includes(user.uid) ? theme.colors.danger : theme.colors.textSecondary }
+-                  ]}>
+-                    {item.likedBy.length}
+-                  </Text>
+-                </TouchableOpacity>
+-                
+-                <TouchableOpacity 
+-                  style={styles.interactionButton}
+-                  onPress={() => openComments(item)}
+-                >
+-                  <Ionicons 
+-                    name="chatbubble-outline" 
+-                    size={18} 
+-                    color={theme.colors.textSecondary} 
+-                  />
+-                  <Text style={[styles.interactionText, { color: theme.colors.textSecondary }]}>
+-                    {item.commentCount || 0}
+-                  </Text>
+-                </TouchableOpacity>
+-              </View>
+-              
+-              {(item.userId === user.uid || ownedPrayerIds.has(item.id)) && (
+-                <View style={[styles.ownerActions, { borderTopColor: theme.colors.divider }]}>
+-                  <TouchableOpacity
+-                    style={[styles.ownerActionButton, { backgroundColor: theme.colors.surface }]}
+-                    onPress={() => handleToggleAnswered(item.id, item.answered)}
+-                  >
+-                    <Ionicons
+-                      name={item.answered ? "close-circle-outline" : "checkmark-circle-outline"}
+-                      size={18}
+-                      color={item.answered ? theme.colors.danger : theme.colors.success}
+-                    />
+-                    <Text style={[
+-                      styles.ownerActionText,
+-                      {
+-                        color: item.answered ? theme.colors.danger : theme.colors.success
+-                      }
+-                    ]}>
+-                      {item.answered ? "Mark Unanswered" : "Mark Answered"}
+-                    </Text>
+-                  </TouchableOpacity>
+-
+-                  <TouchableOpacity
+-                    style={[styles.ownerActionButton, { backgroundColor: `${theme.colors.danger}15` }]}
+-                    onPress={() => handleDeletePrayer(item)}
+-                  >
+-                    <Ionicons
+-                      name="trash-outline"
+-                      size={18}
+-                      color={theme.colors.danger}
+-                    />
+-                    <Text style={[styles.ownerActionText, { color: theme.colors.danger }]}>
+-                      Delete
+-                    </Text>
+-                  </TouchableOpacity>
+-                </View>
+-              )}
+-            </View>
+-          )}
+-          ListEmptyComponent={
+-            <View style={styles.emptyContainer}>
+-              <Ionicons name="people-outline" size={64} color={theme.colors.secondary} />
+-              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
+-                No prayer requests yet
+-              </Text>
+-              <Text style={[styles.emptySubtitle, { color: theme.colors.textSecondary }]}>
+-                Be the first to add a prayer request
+-              </Text>
+-            </View>
+-          }
+-        />
+-        
+-        {/* Comments Modal */}
+-        <Modal
+-          animationType="slide"
+-          transparent={false}
+-          visible={modalVisible}
+-          onRequestClose={() => setModalVisible(false)}
+-        >
+-          <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}>
+-            <StatusBar 
+-              backgroundColor={theme.colors.card} 
+-              barStyle={theme.name === 'dark' ? 'light-content' : 'dark-content'}
+-            />
+-            <View style={[styles.modalHeader, { 
+-              backgroundColor: theme.colors.card,
+-              borderBottomColor: theme.colors.divider,
+-              paddingTop: Platform.OS === 'ios' ? 50 : Constants.statusBarHeight + 5,
+-              ...getShadowStyle(theme)
+-            }]}>
+-              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.backButton}>
+-                <Ionicons name="arrow-back" size={24} color={theme.colors.primary} />
+-              </TouchableOpacity>
+-              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Comments</Text>
+-              <View style={{ width: 24 }} />
+-            </View>
+-            
+-            <KeyboardAvoidingView 
+-              style={{ flex: 1 }} 
+-              behavior={Platform.OS === "ios" ? "padding" : undefined}
+-            >
+-              
+-              {selectedPrayer && (
+-                <View style={[
+-                  styles.originalPrayer, 
+-                  { 
+-                    backgroundColor: theme.colors.card,
+-                    borderLeftColor: theme.colors.primary,
+-                    ...getShadowStyle(theme)
+-                  }
+-                ]}>
+-                  <View style={styles.prayerHeader}>
+-                    <View style={styles.userInfo}>
+-                      <View style={[styles.avatarCircle, { backgroundColor: theme.colors.primary }]}>
+-                        <Text style={styles.avatarText}>
+-                          {selectedPrayer.isAnonymous ? '?' : (selectedPrayer.username || 'U')[0].toUpperCase()}
+-                        </Text>
+-                      </View>
+-                      <View>
+-                        <Text style={[styles.username, { color: theme.colors.text }]}>
+-                          {selectedPrayer.isAnonymous ? 'Anonymous' : (selectedPrayer.username || 'User')}
+-                        </Text>
+-                        <Text style={[styles.prayerDate, { color: theme.colors.textSecondary }]}>
+-                          {formatDate(selectedPrayer.createdAt)}
+-                        </Text>
+-                      </View>
+-                    </View>
+-                    
+-                    {selectedPrayer.answered && (
+-                      <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
+-                        <Text style={styles.answeredText}>Answered</Text>
+-                      </View>
+-                    )}
+-                  </View>
+-                  <Text style={[styles.originalPrayerText, { color: theme.colors.text }]}>
+-                    {selectedPrayer.text}
+-                  </Text>
+-                </View>
+-              )}
+-              
+-              <FlatList
+-                data={comments}
+-                keyExtractor={(item) => item.id}
+-                contentContainerStyle={styles.commentsList}
+-                ListHeaderComponent={
+-                  comments.length > 0 ? (
+-                    <Text style={[styles.commentsCount, { color: theme.colors.textSecondary }]}>
+-                      {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
+-                    </Text>
+-                  ) : null
+-                }
+-                renderItem={({ item }) => (
+-                  <View style={[
+-                    styles.commentItem, 
+-                    { 
+-                      backgroundColor: user?.uid === item.userId 
+-                        ? `${theme.colors.primary}15` 
+-                        : theme.colors.card,
+-                      borderLeftColor: user?.uid === item.userId 
+-                        ? theme.colors.primary 
+-                        : theme.colors.border
+-                    }
+-                  ]}>
+-                    <View style={styles.commentHeader}>
+-                      <View style={styles.commentUser}>
+-                        <View style={[
+-                          styles.smallAvatarCircle, 
+-                          { 
+-                            backgroundColor: user?.uid === item.userId 
+-                              ? theme.colors.primary 
+-                              : theme.colors.secondary
+-                          }
+-                        ]}>
+-                          <Text style={styles.smallAvatarText}>
+-                            {(item.username || 'U')[0].toUpperCase()}
+-                          </Text>
+-                        </View>
+-                        <Text style={[styles.commentAuthor, { color: theme.colors.text }]}>
+-                          {item.username || 'User'}
+-                        </Text>
+-                      </View>
+-                      
+-                      {user?.uid === item.userId && (
+-                        <TouchableOpacity
+-                          onPress={() => handleDeleteComment(item.id, item.userId)}
+-                        >
+-                          <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
+-                        </TouchableOpacity>
+-                      )}
+-                    </View>
+-                    <Text style={[styles.commentText, { color: theme.colors.text }]}>
+-                      {item.text}
+-                    </Text>
+-                    <Text style={[styles.commentDate, { color: theme.colors.textSecondary }]}>
+-                      {formatDate(item.createdAt)}
+-                    </Text>
+-                  </View>
+-                )}
+-                ListEmptyComponent={
+-                  <View style={styles.emptyCommentsContainer}>
+-                    <Ionicons name="chatbubble-outline" size={40} color={theme.colors.secondary} />
+-                    <Text style={[styles.emptyCommentsText, { color: theme.colors.textSecondary }]}>
+-                      No comments yet. Be the first to comment!
+-                    </Text>
+-                  </View>
+-                }
+-              />
+-              
+-              <View style={[
+-                styles.commentInputContainer, 
+-                { 
+-                  borderTopColor: theme.colors.divider,
+-                  backgroundColor: theme.colors.card
+-                }
+-              ]}>
+-                <TextInput
+-                  style={[
+-                    styles.commentInput, 
+-                    { 
+-                      backgroundColor: theme.colors.background, 
+-                      borderColor: theme.colors.border,
+-                      color: theme.colors.text 
+-                    }
+-                  ]}
+-                  value={newComment}
+-                  onChangeText={setNewComment}
+-                  placeholder="Write a comment..."
+-                  placeholderTextColor={theme.colors.secondary}
+-                  multiline
+-                  maxLength={500}
+-                />
+-                <TouchableOpacity 
+-                  style={[
+-                    styles.postButton, 
+-                    { backgroundColor: theme.colors.primary },
+-                    (submitting || !newComment.trim()) && { opacity: 0.5 }
+-                  ]}
+-                  onPress={handleAddComment}
+-                  disabled={submitting || !newComment.trim()}
+-                >
+-                  {submitting ? (
+-                    <ActivityIndicator size="small" color="white" />
+-                  ) : (
+-                    <Ionicons name="send" size={20} color="white" />
+-                  )}
+-                </TouchableOpacity>
+-              </View>
+-            </KeyboardAvoidingView>
+-          </View>
+-        </Modal>
+-      </View>
+-    </KeyboardAvoidingView>
+-  );
+-};
+-
+-// Helper function for consistent shadow styling
+-const getShadowStyle = (theme: any) => {
+-  if (Platform.OS === 'ios') {
+-      return {
+-          shadowColor: theme.colors.shadow,
+-          shadowOffset: { width: 0, height: 2 },
+-          shadowOpacity: 0.8,
+-          shadowRadius: 3,
+-      };
+-  } else {
+-      return {
+-          elevation: 3,
+-      };
+-  }
++import React from 'react';
++import CommunityBoard, { CommunityBoardConfig } from '../components/community/CommunityBoard';
++
++const config: CommunityBoardConfig = {
++  collectionName: 'prayers',
++  itemNoun: 'prayer request',
++  title: 'Prayer Board',
++  subtitle: 'Share your prayer requests and support others',
++  inputPlaceholder: 'Enter your prayer request...',
++  addButtonLabel: 'Add Prayer',
++  loadingText: 'Loading Prayer Board...',
++  loginPromptText: 'Please log in to use the Prayer Board.',
++  emptyTitle: 'No prayer requests yet',
++  emptySubtitle: 'Be the first to add a prayer request',
++  emptyIcon: 'people-outline',
++  supportsAnonymous: true,
++  supportsAnswered: true,
+ };
+ 
+-const styles = StyleSheet.create({
+-  container: {
+-    flex: 1,
+-  },
+-  centerContainer: {
+-    flex: 1,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    padding: 16,
+-  },
+-  header: {
+-    padding: 16,
+-    borderRadius: 0,
+-    marginBottom: 16,
+-  },
+-  title: {
+-    fontSize: 24,
+-    fontWeight: 'bold',
+-    textAlign: 'center',
+-  },
+-  subtitle: {
+-    fontSize: 14,
+-    textAlign: 'center',
+-    marginTop: 4,
+-  },
+-  inputContainer: {
+-    marginHorizontal: 16,
+-    marginBottom: 16,
+-    borderRadius: 12,
+-    borderWidth: 0,
+-  },
+-  input: {
+-    padding: 16,
+-    fontSize: 16,
+-    minHeight: 100,
+-    maxHeight: 150,
+-    textAlignVertical: 'top',
+-  },
+-  addButton: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    padding: 12,
+-    borderRadius: 8,
+-    margin: 8,
+-  },
+-  addButtonText: {
+-    color: 'white',
+-    fontWeight: '600',
+-    marginLeft: 8,
+-  },
+-  listContent: {
+-    paddingHorizontal: 16,
+-    paddingBottom: 24
+-  },
+-  prayerItem: {
+-    borderRadius: 12,
+-    marginBottom: 16,
+-    borderWidth: 0,
+-    overflow: 'hidden',
+-  },
+-  answeredPrayer: {
+-    borderLeftWidth: 4,
+-  },
+-  prayerHeader: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    alignItems: 'center',
+-    padding: 12,
+-  },
+-  userInfo: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-  },
+-  avatarCircle: {
+-    width: 36,
+-    height: 36,
+-    borderRadius: 18,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    marginRight: 10,
+-  },
+-  avatarText: {
+-    color: 'white',
+-    fontSize: 16,
+-    fontWeight: 'bold',
+-  },
+-  username: {
+-    fontSize: 14,
+-    fontWeight: '600',
+-  },
+-  prayerDate: {
+-    fontSize: 12,
+-  },
+-  answeredBadge: {
+-    paddingHorizontal: 8,
+-    paddingVertical: 4,
+-    borderRadius: 12,
+-  },
+-  answeredText: {
+-    color: 'white',
+-    fontSize: 12,
+-    fontWeight: '600',
+-  },
+-  prayerText: {
+-    fontSize: 16,
+-    lineHeight: 24,
+-    paddingHorizontal: 12,
+-    paddingBottom: 16,
+-  },
+-  interactionBar: {
+-    flexDirection: 'row',
+-    borderTopWidth: 1,
+-    paddingVertical: 8,
+-    paddingHorizontal: 12,
+-  },
+-  interactionButton: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    marginRight: 20,
+-  },
+-  interactionText: {
+-    marginLeft: 4,
+-    fontSize: 14,
+-  },
+-  ownerActions: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    padding: 8,
+-    borderTopWidth: 1,
+-  },
+-  ownerActionButton: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    paddingVertical: 8,
+-    paddingHorizontal: 12,
+-    borderRadius: 8,
+-    flex: 0.48,
+-  },
+-  ownerActionText: {
+-    marginLeft: 8,
+-    fontSize: 14,
+-    fontWeight: '500',
+-  },
+-  message: {
+-    padding: 20,
+-    textAlign: 'center',
+-    fontSize: 16,
+-  },
+-  emptyContainer: {
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    padding: 40,
+-    marginTop: 20,
+-  },
+-  emptyTitle: {
+-    fontSize: 18,
+-    fontWeight: 'bold',
+-    marginTop: 16,
+-  },
+-  emptySubtitle: {
+-    fontSize: 14,
+-    marginTop: 8,
+-    textAlign: 'center',
+-  },
+-  modalContainer: {
+-    flex: 1,
+-  },
+-  modalHeader: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    alignItems: 'center',
+-    padding: 16,
+-    borderBottomWidth: 1,
+-  },
+-  modalTitle: {
+-    fontSize: 18,
+-    fontWeight: 'bold',
+-  },
+-  backButton: {
+-    padding: 4,
+-    minWidth: 32,
+-    minHeight: 32,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  originalPrayer: {
+-    margin: 16,
+-    borderRadius: 12,
+-    borderLeftWidth: 4,
+-  },
+-  originalPrayerText: {
+-    fontSize: 16,
+-    lineHeight: 24,
+-    padding: 12,
+-  },
+-  commentsList: {
+-    padding: 16,
+-    paddingBottom: 80,
+-  },
+-  commentsCount: {
+-    fontSize: 14,
+-    marginBottom: 12,
+-  },
+-  commentItem: {
+-    padding: 12,
+-    borderRadius: 8,
+-    marginBottom: 12,
+-    borderLeftWidth: 3,
+-  },
+-  commentHeader: {
+-    flexDirection: 'row',
+-    justifyContent: 'space-between',
+-    alignItems: 'center',
+-    marginBottom: 8,
+-  },
+-  commentUser: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-  },
+-  smallAvatarCircle: {
+-    width: 24,
+-    height: 24,
+-    borderRadius: 12,
+-    justifyContent: 'center',
+-    alignItems: 'center',
+-    marginRight: 8,
+-  },
+-  smallAvatarText: {
+-    color: 'white',
+-    fontSize: 12,
+-    fontWeight: 'bold',
+-  },
+-  commentAuthor: {
+-    fontWeight: '600',
+-    fontSize: 14,
+-  },
+-  commentText: {
+-    fontSize: 15,
+-    lineHeight: 22,
+-  },
+-  commentDate: {
+-    fontSize: 12,
+-    marginTop: 8,
+-    textAlign: 'right',
+-  },
+-  emptyCommentsContainer: {
+-    alignItems: 'center',
+-    paddingVertical: 30,
+-  },
+-  emptyCommentsText: {
+-    marginTop: 8,
+-    textAlign: 'center',
+-  },
+-  commentInputContainer: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    padding: 12,
+-    borderTopWidth: 1,
+-    position: 'absolute',
+-    bottom: 0,
+-    left: 0,
+-    right: 0,
+-  },
+-  commentInput: {
+-    flex: 1,
+-    minHeight: 40,
+-    maxHeight: 100,
+-    borderWidth: 1,
+-    borderRadius: 20,
+-    paddingHorizontal: 16,
+-    paddingVertical: 8,
+-    marginRight: 8,
+-  },
+-  postButton: {
+-    width: 40,
+-    height: 40,
+-    borderRadius: 20,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  anonymousToggleContainer: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    paddingHorizontal: 16,
+-    paddingBottom: 8,
+-  },
+-  anonymousToggle: {
+-    width: 20,
+-    height: 20,
+-    borderRadius: 4,
+-    borderWidth: 2,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    marginRight: 8,
+-  },
+-  anonymousLabel: {
+-    fontSize: 14,
+-  },
+-  charCount: {
+-    fontSize: 12,
+-    textAlign: 'right',
+-    paddingHorizontal: 16,
+-    paddingBottom: 8,
+-  },
+-});
++const PrayerBoard: React.FC = () => <CommunityBoard config={config} />;
+ 
+-export default PrayerBoard;
+\ No newline at end of file
++export default PrayerBoard;
+diff --git a/src/utils/dateUtils.ts b/src/utils/dateUtils.ts
+new file mode 100644
+index 00000000..3c4dbe77
+--- /dev/null
++++ b/src/utils/dateUtils.ts
+@@ -0,0 +1,30 @@
++import { Timestamp } from 'firebase/firestore';
++
++/**
++ * Formats a Firestore Timestamp (or date-like value) as a relative date string.
++ * Previously duplicated verbatim in PrayerBoard and BiblicalDiscussions.
++ */
++export function formatRelativeDate(timestamp: Timestamp | Date | string | null | undefined): string {
++  if (!timestamp) return '';
++
++  const date =
++    timestamp instanceof Date
++      ? timestamp
++      : typeof (timestamp as Timestamp).toDate === 'function'
++        ? (timestamp as Timestamp).toDate()
++        : new Date(timestamp as string);
++
++  const now = new Date();
++  const diffTime = Math.abs(now.getTime() - date.getTime());
++  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
++
++  if (diffDays === 0) {
++    return 'Today';
++  } else if (diffDays === 1) {
++    return 'Yesterday';
++  } else if (diffDays < 7) {
++    return `${diffDays} days ago`;
++  } else {
++    return date.toLocaleDateString();
++  }
++}
