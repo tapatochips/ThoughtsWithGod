@@ -81,8 +81,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
 
       const result = await createSubscription(
         selectedPlan.id,
-        paymentMethod.id,
-        user.email || ''
+        paymentMethod.id
       );
 
       if (result.success) {

@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
+import { blockUser, reportContent, REPORT_REASONS, ContentType } from '../services/firebase/moderationService';
 import {
   collection,
   addDoc,
@@ -23,11 +24,9 @@ import {
   doc,
   deleteDoc,
   updateDoc,
-  setDoc,
   writeBatch,
   query,
   orderBy,
-  Timestamp,
   serverTimestamp,
   arrayUnion,
   arrayRemove,
@@ -59,7 +58,7 @@ interface PrayerRequest {
 }
 
 const PrayerBoard: React.FC = () => {
-  const { user, db, userProfile } = useFirebase();
+  const { user, db, userProfile, blockedUserIds } = useFirebase();
   const { theme } = useTheme();
   const [newPrayer, setNewPrayer] = useState('');
   const [prayers, setPrayers] = useState<PrayerRequest[]>([]);
@@ -184,7 +183,8 @@ const PrayerBoard: React.FC = () => {
         // to prevent de-anonymisation via direct Firestore reads.
         userId: isAnonymous ? null : user.uid,
         username: isAnonymous ? 'Anonymous' : (userProfile?.username || `User_${user.uid.substring(0, 5)}`),
-        createdAt: Timestamp.now(),
+        // Security rules require createdAt == request.time, so this MUST be serverTimestamp()
+        createdAt: serverTimestamp(),
         answered: false,
         likedBy: [],
         commentCount: 0,
@@ -192,18 +192,22 @@ const PrayerBoard: React.FC = () => {
       });
 
       // Update rate limit atomically with the prayer creation.
-      // The Firestore rule only allows setting lastActionAt to request.time,
-      // preventing a user from writing a past timestamp to reset their own limit.
+      // Security rules REQUIRE this write in the same batch (updatesRateLimit),
+      // and only allow lastActionAt == request.time, so the cooldown cannot be
+      // bypassed or reset with a fake timestamp.
       const rateLimitRef = doc(db, `rateLimits/${user.uid}`);
       batch.set(rateLimitRef, { lastActionAt: serverTimestamp() });
 
-      await batch.commit();
-
       if (isAnonymous) {
-        // Record ownership privately so the current user can still edit/delete their post
+        // The private ownership record MUST be created in the same batch as the
+        // prayer — security rules enforce this atomicity, which both prevents
+        // orphaned anonymous prayers and blocks other users from ever claiming
+        // ownership of an existing anonymous prayer.
         const ownerDoc = doc(db, `users/${user.uid}/ownedPrayers`, prayerRef.id);
-        await setDoc(ownerDoc, { prayerId: prayerRef.id, createdAt: Timestamp.now() });
+        batch.set(ownerDoc, { prayerId: prayerRef.id, createdAt: serverTimestamp() });
       }
+
+      await batch.commit();
 
       setNewPrayer('');
       setIsAnonymous(false);
@@ -323,7 +327,7 @@ const PrayerBoard: React.FC = () => {
         text: validation.sanitized,
         userId: user.uid,
         username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
-        createdAt: Timestamp.now()
+        createdAt: serverTimestamp()
       });
 
       // Update comment count atomically to avoid race conditions under concurrent use
@@ -362,6 +366,67 @@ const PrayerBoard: React.FC = () => {
     } catch (error) {
       console.error("Error deleting comment:", error);
     }
+  };
+
+  const handleBlockUser = (targetUserId: string, targetUsername: string) => {
+    if (!user || !db) return;
+    Alert.alert(
+      'Block User',
+      `Block ${targetUsername}? You won't see their posts or comments anymore.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(db, user.uid, targetUserId);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to block user. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const showReportReasons = (contentType: ContentType, contentId: string, authorId: string | null) => {
+    Alert.alert(
+      'Report',
+      'Why are you reporting this?',
+      [
+        ...REPORT_REASONS.map(reason => ({
+          text: reason,
+          onPress: async () => {
+            if (!user || !db) return;
+            try {
+              await reportContent(db, user.uid, contentType, contentId, authorId, reason);
+              Alert.alert('Reported', 'Thank you. We will review this content.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to submit report. Please try again.');
+            }
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const showPostMenu = (item: PrayerRequest) => {
+    const isAnonymous = item.isAnonymous || !item.userId;
+    const buttons: any[] = [];
+    if (!isAnonymous && item.userId) {
+      buttons.push({
+        text: 'Block User',
+        onPress: () => handleBlockUser(item.userId!, item.username),
+      });
+    }
+    buttons.push({
+      text: 'Report',
+      onPress: () => showReportReasons('prayer', item.id, item.userId ?? null),
+    });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Options', undefined, buttons);
   };
 
   // Function to format the timestamp
@@ -475,7 +540,7 @@ const PrayerBoard: React.FC = () => {
         </View>
         
         <FlatList
-          data={prayers}
+          data={prayers.filter(p => !p.userId || !blockedUserIds.includes(p.userId))}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -505,12 +570,22 @@ const PrayerBoard: React.FC = () => {
                     </Text>
                   </View>
                 </View>
-                
-                {item.answered && (
-                  <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
-                    <Text style={styles.answeredText}>Answered</Text>
-                  </View>
-                )}
+
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {item.answered && (
+                    <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
+                      <Text style={styles.answeredText}>Answered</Text>
+                    </View>
+                  )}
+                  {item.userId !== user.uid && !ownedPrayerIds.has(item.id) && (
+                    <TouchableOpacity
+                      style={{ padding: 4, marginLeft: 4 }}
+                      onPress={() => showPostMenu(item)}
+                    >
+                      <Ionicons name="ellipsis-vertical" size={18} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
               
               <Text style={[styles.prayerText, { color: theme.colors.text }]}>
@@ -670,7 +745,7 @@ const PrayerBoard: React.FC = () => {
               )}
               
               <FlatList
-                data={comments}
+                data={comments.filter(c => !blockedUserIds.includes(c.userId))}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.commentsList}
                 ListHeaderComponent={
@@ -711,11 +786,17 @@ const PrayerBoard: React.FC = () => {
                         </Text>
                       </View>
                       
-                      {user?.uid === item.userId && (
+                      {user?.uid === item.userId ? (
                         <TouchableOpacity
                           onPress={() => handleDeleteComment(item.id, item.userId)}
                         >
                           <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          onPress={() => showReportReasons('comment', item.id, item.userId)}
+                        >
+                          <Ionicons name="flag-outline" size={16} color={theme.colors.textSecondary} />
                         </TouchableOpacity>
                       )}
                     </View>

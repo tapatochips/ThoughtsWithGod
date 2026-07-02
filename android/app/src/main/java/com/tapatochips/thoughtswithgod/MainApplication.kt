@@ -1,4 +1,4 @@
-package com.yourdomain.thoughtswithgod
+package com.tapatochips.thoughtswithgod
 
 import android.app.Application
 import android.content.res.Configuration

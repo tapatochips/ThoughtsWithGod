@@ -21,36 +21,39 @@ export interface PaymentMethod {
 // Get Stripe publishable key from config
 export const STRIPE_PUBLISHABLE_KEY = Constants.expoConfig?.extra?.STRIPE_PUBLISHABLE_KEY || '';
 
-// Available subscription plans
+// Available subscription plans.
+//
+// SINGLE SOURCE OF TRUTH for client-side plan display.
+// IMPORTANT: `id` values MUST match the keys in the Cloud Function's planPrices
+// map (functions/index.tsx). The actual charge amount comes from the Stripe
+// Price object referenced by the server-side secret for each plan — the
+// `price` field here is display-only and should match your Stripe dashboard.
 export const subscriptionPlans: SubscriptionPlan[] = [
     {
-        id: 'monthly_tier1',
+        id: 'monthly_basic',
         name: 'Monthly Tier 1',
         description: 'Want to support us?',
-        price: 5.00,
-        priceId: 'price_basic_monthly', // Update with your actual Stripe Price ID
+        price: 4.99,
         features: [
             'This plan helps keep the app running!'
         ],
         durationMonths: 1
     },
     {
-        id: 'monthly_tier2',
+        id: 'monthly_premium',
         name: 'Monthly Tier 2',
         description: 'Support the app with a higher tier subscription, thank you!',
-        price: 10.00,
-        priceId: 'price_premium_monthly', // Update with your actual Stripe Price ID
+        price: 9.99,
         features: [
             'Want to support us more? Choose this plan!',
         ],
         durationMonths: 1
     },
     {
-        id: 'monthly_tier3',
+        id: 'monthly_pro',
         name: 'Monthly Tier 3',
         description: 'Our most generous monthly support tier, thank you so much!',
         price: 20.00,
-        priceId: 'price_premium_monthly_2', // Update with your actual Stripe Price ID
         features: [
             'Want to support us even more? Choose this plan!',
         ],
@@ -59,9 +62,8 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     {
         id: 'yearly_premium',
         name: 'Yearly Premium',
-        description: 'Our best value plan with 2 months free',
-        price: 80.00,
-        priceId: 'price_yearly_premium', // Update with your actual Stripe Price ID
+        description: 'Our best value yearly plan',
+        price: 99.99,
         features: [
             'Want to support us even more? Choose this plan!',
         ],
@@ -86,8 +88,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
 // Create a subscription
 export async function createSubscription(
     planId: string,
-    paymentMethodId: string,
-    customerEmail: string
+    paymentMethodId: string
 ): Promise<{
     success: boolean;
     subscriptionId?: string;
@@ -101,8 +102,7 @@ export async function createSubscription(
         const createSubscriptionFunction = httpsCallable(functions, 'createSubscription');
         const result = await createSubscriptionFunction({
             planId,
-            paymentMethodId,
-            customerEmail
+            paymentMethodId
         });
 
         const data = result.data as any;

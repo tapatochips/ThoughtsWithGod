@@ -30,6 +30,15 @@ service cloud.firestore {
       return text is string && text.size() > 0 && text.size() <= maxLen;
     }
 
+    // Enforce that this same request also writes the caller's rate-limit doc
+    // with the current server time. getAfter() evaluates post-write state, so
+    // this can only be true if the rateLimits update is part of the same
+    // batched write as the create. Without this, a malicious client could
+    // simply skip updating rateLimits and bypass the cooldown entirely.
+    function updatesRateLimit(userId) {
+      return getAfter(/databases/$(database)/documents/rateLimits/$(userId)).data.lastActionAt == request.time;
+    }
+
     // Rate limiting: Check if enough time has passed since last action
     // This requires a 'lastActionAt' field in the user's rate limit doc
     function canPerformAction(userId) {
@@ -80,10 +89,16 @@ service cloud.firestore {
       // This lets rules verify ownership without exposing userId in the prayer document itself
       match /ownedPrayers/{prayerId} {
         allow read: if isOwner(userId);
-        // Only allow creating an ownership record for a prayer that is actually anonymous
+        // Ownership may only be claimed for a prayer that is being created in
+        // THIS same batched write: the prayer must not exist before the request
+        // (!exists checks pre-write state) and must be anonymous after it
+        // (getAfter checks post-write state). This prevents any user from
+        // claiming ownership of someone else's existing anonymous prayer and
+        // then editing or deleting it.
         allow create: if isOwner(userId) &&
-                        get(/databases/$(database)/documents/prayers/$(prayerId)).data.isAnonymous == true &&
-                        get(/databases/$(database)/documents/prayers/$(prayerId)).data.userId == null;
+                        !exists(/databases/$(database)/documents/prayers/$(prayerId)) &&
+                        getAfter(/databases/$(database)/documents/prayers/$(prayerId)).data.isAnonymous == true &&
+                        getAfter(/databases/$(database)/documents/prayers/$(prayerId)).data.userId == null;
         allow delete: if isOwner(userId);
       }
     }
@@ -132,8 +147,12 @@ service cloud.firestore {
       // Creation with validation
       allow create: if isAuthenticated() &&
                       canPerformAction(request.auth.uid) &&
+                      // The same batch MUST also update the rate-limit doc
+                      updatesRateLimit(request.auth.uid) &&
                       // Validate required fields
                       request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                      // createdAt must be the server timestamp (client must use serverTimestamp())
+                      request.resource.data.createdAt == request.time &&
                       // Validate content length (max 2000 chars)
                       isValidContent(request.resource.data.text, 2000) &&
                       // Ensure likedBy starts empty
@@ -145,10 +164,13 @@ service cloud.firestore {
                         (request.resource.data.get('isAnonymous', false) == false &&
                          request.resource.data.userId == request.auth.uid &&
                          isValidLength(request.resource.data.username, 1, 30)) ||
-                        // Anonymous: userId must be null, username must be 'Anonymous'
+                        // Anonymous: userId must be null, username must be 'Anonymous',
+                        // and the private ownership record MUST be created in the same
+                        // batch (prevents orphaned anonymous prayers with no owner).
                         (request.resource.data.isAnonymous == true &&
                          request.resource.data.userId == null &&
-                         request.resource.data.username == 'Anonymous')
+                         request.resource.data.username == 'Anonymous' &&
+                         getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/ownedPrayers/$(prayerId)).data.prayerId == prayerId)
                       );
 
       // Owner can update their own prayers (except likedBy/commentCount which have special rules)
@@ -215,9 +237,13 @@ service cloud.firestore {
       // Creation with validation
       allow create: if isAuthenticated() &&
                       canPerformAction(request.auth.uid) &&
+                      // The same batch MUST also update the rate-limit doc
+                      updatesRateLimit(request.auth.uid) &&
                       request.resource.data.userId == request.auth.uid &&
                       // Validate required fields
                       request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                      // createdAt must be the server timestamp (client must use serverTimestamp())
+                      request.resource.data.createdAt == request.time &&
                       // Validate content length (max 2000 chars)
                       isValidContent(request.resource.data.text, 2000) &&
                       // Validate username

@@ -3,9 +3,14 @@
         "version": ">= 3.0.0"
     },
     "build": {
-        "production": {
+        "preview": {
             "android": {
                 "buildType": "apk"
+            }
+        },
+        "production": {
+            "android": {
+                "buildType": "app-bundle"
             },
             "ios": {
                 "simulator": false

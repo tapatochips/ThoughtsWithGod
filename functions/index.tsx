@@ -60,7 +60,6 @@ function getEmailTransport(): ReturnType<typeof nodemailer.createTransport> {
 interface CreateSubscriptionData {
     planId: string;
     paymentMethodId: string;
-    customerEmail: string;
 }
 
 export const createSubscription = onCall<CreateSubscriptionData>(
@@ -73,8 +72,16 @@ export const createSubscription = onCall<CreateSubscriptionData>(
             throw new HttpsError('unauthenticated', 'Must be logged in to create subscription');
         }
 
-        const { planId, paymentMethodId, customerEmail } = request.data;
+        const { planId, paymentMethodId } = request.data;
         const userId = request.auth.uid;
+
+        // Use the email from the verified auth token — never trust a client-
+        // supplied email, which could attach someone else's address to the
+        // Stripe customer (receipts, invoices) or be spoofed entirely.
+        const customerEmail = request.auth.token.email;
+        if (!customerEmail) {
+            throw new HttpsError('invalid-argument', 'No verified email address on file for this account');
+        }
 
         try {
             // Plan mapping — price IDs are stored as Cloud Function secrets so they

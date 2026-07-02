@@ -29,51 +29,11 @@ export interface Subscription {
   transactionId?: string;
 }
 
-// Available subscription plans
-export const subscriptionPlans: SubscriptionPlan[] = [
-  {
-    id: 'monthly_tier1',
-    name: 'Monthly Tier 1',
-    description: 'Access to all premium features for 1 month',
-    price: 5.00,
-    features: [
-      'Ad-free experience',
-      'Unlimited favorite verses',
-    ],
-    durationMonths: 1
-  },
-  {
-    id: 'monthly_tier2',
-    name: 'Monthly Tier 2',
-    description: 'Support the app with a higher tier subscription, thank you!',
-    price: 10.00,
-    features: [
-      'All Basic features',
-    ],
-    durationMonths: 1
-  },
-  {
-    id: 'monthly_tier3',
-    name: 'Monthly Tier 3',
-    description: 'Our most generous monthly support tier, thank you so much!',
-    price: 20.00,
-    features: [
-      'All Basic features',
-    ],
-    durationMonths: 1
-  },
-  {
-    id: 'yearly_premium',
-    name: 'Yearly Premium',
-    description: 'Our best value plan with 2 months free',
-    price: 80.00,
-    features: [
-      'All Premium features',
-      'Two months free (compared to monthly)',
-    ],
-    durationMonths: 12
-  }
-];
+// Plans are defined ONCE in the payment service — re-export the canonical list
+// so old imports keep working. (Previously this file held a second, divergent
+// copy with different IDs, which is exactly how the client/server plan-ID
+// mismatch bug happened.)
+export { subscriptionPlans } from '../payment/stripeService';
 
 // Get user's current subscription status
 export async function getUserSubscription(userId: string): Promise<Subscription | null> {

@@ -1,7 +1,7 @@
 // src/context/FirebaseContext.tsx
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
 import { FirebaseApp } from "firebase/app";
-import { Firestore } from "firebase/firestore";
+import { Firestore, collection, onSnapshot } from "firebase/firestore";
 import { Auth, User, onAuthStateChanged } from "firebase/auth";
 import { firebaseInstance } from '../services/firebase/firebaseReactNative';
 import {
@@ -25,6 +25,8 @@ interface FirebaseContextType {
     premiumPlan: string | null;
     premiumExpiry: Date | null;
     refreshPremiumStatus: () => Promise<void>;
+    // Moderation
+    blockedUserIds: string[];
 }
 
 interface FirebaseProviderProps {
@@ -43,7 +45,8 @@ const FirebaseContext = createContext<FirebaseContextType>({
     isPremiumUser: false,
     premiumPlan: null,
     premiumExpiry: null,
-    refreshPremiumStatus: async () => { }
+    refreshPremiumStatus: async () => { },
+    blockedUserIds: [],
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
@@ -56,6 +59,9 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     const [isPremiumUser, setIsPremiumUser] = useState(false);
     const [premiumPlan, setPremiumPlan] = useState<string | null>(null);
     const [premiumExpiry, setPremiumExpiry] = useState<Date | null>(null);
+
+    // Blocked users state
+    const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
 
     // Function to check premium status
     const checkUserPremiumStatus = async (userId: string) => {
@@ -104,6 +110,21 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         };
 
         fetchUserProfile();
+    }, [user]);
+
+    // Listen for blocked users in real time
+    useEffect(() => {
+        if (!user || !firebaseInstance.db) {
+            setBlockedUserIds([]);
+            return;
+        }
+        const blockedCollection = collection(firebaseInstance.db, `users/${user.uid}/blockedUsers`);
+        const unsubscribe = onSnapshot(blockedCollection, (snapshot) => {
+            setBlockedUserIds(snapshot.docs.map(d => d.id));
+        }, (error) => {
+            console.error('Error fetching blocked users:', error);
+        });
+        return unsubscribe;
     }, [user]);
 
     // Set up auth state listener
@@ -163,7 +184,8 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         isPremiumUser,
         premiumPlan,
         premiumExpiry,
-        refreshPremiumStatus
+        refreshPremiumStatus,
+        blockedUserIds,
     };
 
     return (

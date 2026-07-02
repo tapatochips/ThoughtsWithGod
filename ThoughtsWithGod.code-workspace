@@ -15,6 +15,7 @@
 		"terminal.integrated.cursorBlinking": true,
 		"terminal.integrated.fontLigatures.enabled": true,
 		"terminal.integrated.suggest.enabled": true,
-		"java.compile.nullAnalysis.mode": "automatic"
+		"java.compile.nullAnalysis.mode": "automatic",
+		"java.configuration.updateBuildConfiguration": "interactive"
 	}
 }

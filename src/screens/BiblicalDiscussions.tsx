@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
+import { blockUser, reportContent, REPORT_REASONS, ContentType } from '../services/firebase/moderationService';
 import {
   collection,
   addDoc,
@@ -26,7 +27,6 @@ import {
   writeBatch,
   query,
   orderBy,
-  Timestamp,
   serverTimestamp,
   arrayUnion,
   arrayRemove,
@@ -57,7 +57,7 @@ interface BiblicalDiscussion {
 }
 
 const BiblicalDiscussions: React.FC = () => {
-  const { user, db, userProfile } = useFirebase();
+  const { user, db, userProfile, blockedUserIds } = useFirebase();
   const { theme } = useTheme();
   const [newDiscussion, setNewDiscussion] = useState('');
   const [discussions, setDiscussions] = useState<BiblicalDiscussion[]>([]);
@@ -153,7 +153,8 @@ const BiblicalDiscussions: React.FC = () => {
         text: validation.sanitized,
         userId: user.uid,
         username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
-        createdAt: Timestamp.now(),
+        // Security rules require createdAt == request.time, so this MUST be serverTimestamp()
+        createdAt: serverTimestamp(),
         likedBy: [],
         commentCount: 0
       });
@@ -262,7 +263,7 @@ const BiblicalDiscussions: React.FC = () => {
         text: validation.sanitized,
         userId: user.uid,
         username: userProfile?.username || `User_${user.uid.substring(0, 5)}`,
-        createdAt: Timestamp.now()
+        createdAt: serverTimestamp()
       });
 
       // Update comment count atomically to avoid race conditions under concurrent use
@@ -301,6 +302,64 @@ const BiblicalDiscussions: React.FC = () => {
     } catch (error) {
       console.error("Error deleting comment:", error);
     }
+  };
+
+  const handleBlockUser = (targetUserId: string, targetUsername: string) => {
+    if (!user || !db) return;
+    Alert.alert(
+      'Block User',
+      `Block ${targetUsername}? You won't see their posts or comments anymore.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(db, user.uid, targetUserId);
+            } catch (error) {
+              Alert.alert('Error', 'Failed to block user. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const showReportReasons = (contentType: ContentType, contentId: string, authorId: string | null) => {
+    Alert.alert(
+      'Report',
+      'Why are you reporting this?',
+      [
+        ...REPORT_REASONS.map(reason => ({
+          text: reason,
+          onPress: async () => {
+            if (!user || !db) return;
+            try {
+              await reportContent(db, user.uid, contentType, contentId, authorId, reason);
+              Alert.alert('Reported', 'Thank you. We will review this content.');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to submit report. Please try again.');
+            }
+          },
+        })),
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const showPostMenu = (item: BiblicalDiscussion) => {
+    Alert.alert('Options', undefined, [
+      {
+        text: 'Block User',
+        onPress: () => handleBlockUser(item.userId, item.username),
+      },
+      {
+        text: 'Report',
+        onPress: () => showReportReasons('discussion', item.id, item.userId),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   // Function to format the timestamp
@@ -397,7 +456,7 @@ const BiblicalDiscussions: React.FC = () => {
         </View>
         
         <FlatList
-          data={discussions}
+          data={discussions.filter(d => !blockedUserIds.includes(d.userId))}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -426,6 +485,14 @@ const BiblicalDiscussions: React.FC = () => {
                     </Text>
                   </View>
                 </View>
+                {user.uid !== item.userId && (
+                  <TouchableOpacity
+                    style={{ padding: 4 }}
+                    onPress={() => showPostMenu(item)}
+                  >
+                    <Ionicons name="ellipsis-vertical" size={18} color={theme.colors.textSecondary} />
+                  </TouchableOpacity>
+                )}
               </View>
               
               <Text style={[styles.discussionText, { color: theme.colors.text }]}>
@@ -571,24 +638,25 @@ const BiblicalDiscussions: React.FC = () => {
                   ) : null
                 }
                 renderItem={({ item }) => (
+                  !blockedUserIds.includes(item.userId) ? (
                   <View style={[
-                    styles.commentItem, 
-                    { 
-                      backgroundColor: user?.uid === item.userId 
-                        ? `${theme.colors.primary}15` 
+                    styles.commentItem,
+                    {
+                      backgroundColor: user?.uid === item.userId
+                        ? `${theme.colors.primary}15`
                         : theme.colors.card,
-                      borderLeftColor: user?.uid === item.userId 
-                        ? theme.colors.primary 
+                      borderLeftColor: user?.uid === item.userId
+                        ? theme.colors.primary
                         : theme.colors.border
                     }
                   ]}>
                     <View style={styles.commentHeader}>
                       <View style={styles.commentUser}>
                         <View style={[
-                          styles.smallAvatarCircle, 
-                          { 
-                            backgroundColor: user?.uid === item.userId 
-                              ? theme.colors.primary 
+                          styles.smallAvatarCircle,
+                          {
+                            backgroundColor: user?.uid === item.userId
+                              ? theme.colors.primary
                               : theme.colors.secondary
                           }
                         ]}>
@@ -600,12 +668,18 @@ const BiblicalDiscussions: React.FC = () => {
                           {item.username || 'User'}
                         </Text>
                       </View>
-                      
-                      {user?.uid === item.userId && (
+
+                      {user?.uid === item.userId ? (
                         <TouchableOpacity
                           onPress={() => handleDeleteComment(item.id, item.userId)}
                         >
                           <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          onPress={() => showReportReasons('comment', item.id, item.userId)}
+                        >
+                          <Ionicons name="flag-outline" size={16} color={theme.colors.textSecondary} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -616,6 +690,7 @@ const BiblicalDiscussions: React.FC = () => {
                       {formatDate(item.createdAt)}
                     </Text>
                   </View>
+                  ) : null
                 )}
                 ListEmptyComponent={
                   <View style={styles.emptyCommentsContainer}>
