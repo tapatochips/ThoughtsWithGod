@@ -236,7 +236,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
           </Text>
 
           <Text style={[styles.subheader, { color: theme.colors.textSecondary }]}>
-            Remove ads, and save unlimited verses. Your support helps us keep the app running and continuously improving!
+            Your support helps us keep the app running and continuously improving!
           </Text>
 
           {/* Plan Selection */}
