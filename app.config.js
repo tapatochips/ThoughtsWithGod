@@ -38,7 +38,7 @@ module.exports = {
       backgroundColor: "#ffffff"
     },
     package: "com.tapatochips.thoughtswithgod",
-    versionCode: 3
+    versionCode: 7
   },
   web: {
     favicon: "./assets/favicon.png"

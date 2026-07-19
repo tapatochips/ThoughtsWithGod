@@ -4,7 +4,7 @@ import {
   setDoc,
   deleteDoc,
   addDoc,
-  Timestamp,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { Firestore } from 'firebase/firestore';
 
@@ -26,7 +26,7 @@ export async function blockUser(
   const blockRef = doc(db, `users/${currentUserId}/blockedUsers`, targetUserId);
   await setDoc(blockRef, {
     blockedUserId: targetUserId,
-    blockedAt: Timestamp.now(),
+    blockedAt: serverTimestamp(),
   });
 }
 
@@ -53,7 +53,7 @@ export async function reportContent(
     contentId,
     authorId: authorId ?? null,
     reason,
-    createdAt: Timestamp.now(),
+    createdAt: serverTimestamp(),
     status: 'pending',
   });
 }

@@ -29,7 +29,6 @@ import {
   arrayUnion,
   arrayRemove,
   getDocs,
-  increment
 } from 'firebase/firestore';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -365,12 +364,6 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
         createdAt: serverTimestamp()
       });
 
-      // Update comment count atomically to avoid race conditions
-      const postDoc = doc(db, collectionName, selectedPost.id);
-      await updateDoc(postDoc, {
-        commentCount: increment(1)
-      });
-
       setNewComment('');
     } catch (error) {
       console.error('Error adding comment:', error);
@@ -392,10 +385,6 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
       const commentDoc = doc(db, `${collectionName}/${selectedPost.id}/comments`, commentId);
       await deleteDoc(commentDoc);
 
-      const postDoc = doc(db, collectionName, selectedPost.id);
-      await updateDoc(postDoc, {
-        commentCount: increment(-1)
-      });
     } catch (error) {
       console.error('Error deleting comment:', error);
     }

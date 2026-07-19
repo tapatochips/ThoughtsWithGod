@@ -7,9 +7,9 @@ import { firebaseInstance } from '../services/firebase/firebaseReactNative';
 import {
     UserProfile,
     createUserProfile,
-    getUserProfile,
-    getPremiumDetails
+    getUserProfile
 } from '../services/firebase/userProfile';
+import { validateSubscription } from '../services/payment/stripeService';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
@@ -50,7 +50,7 @@ const FirebaseContext = createContext<FirebaseContextType>({
 });
 
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) => {
-    console.log("FirebaseProvider rendered");
+    if (__DEV__) console.log("FirebaseProvider rendered");
     const [user, setUser] = useState<User | null>(firebaseInstance.auth?.currentUser || null);
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -66,13 +66,15 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     // Function to check premium status
     const checkUserPremiumStatus = async (userId: string) => {
         try {
-            // Get premium details from user profile or subscription
-            const premiumDetails = await getPremiumDetails(userId);
+            // The callable validates against Stripe. Firestore profile fields
+            // are display cache only and must never grant access.
+            void userId;
+            const premiumDetails = await validateSubscription();
 
             if (premiumDetails && premiumDetails.isPremium) {
                 setIsPremiumUser(true);
                 setPremiumPlan(premiumDetails.plan || null);
-                setPremiumExpiry(premiumDetails.expiryDate || null);
+                setPremiumExpiry(premiumDetails.endDate ? new Date(premiumDetails.endDate) : null);
             } else {
                 setIsPremiumUser(false);
                 setPremiumPlan(null);
@@ -130,20 +132,20 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
     // Set up auth state listener
     useEffect(() => {
         if (!firebaseInstance.auth) {
-            console.log("Auth not initialized in FirebaseProvider");
+            if (__DEV__) console.log("Auth not initialized in FirebaseProvider");
             setIsLoading(false);
             return;
         }
 
-        console.log("Setting up auth state listener");
+        if (__DEV__) console.log("Setting up auth state listener");
         const unsubscribe = onAuthStateChanged(firebaseInstance.auth, (firebaseUser) => {
-            console.log("Auth state changed:", firebaseUser?.email);
+            if (__DEV__) console.log("Auth state changed:", firebaseUser ? 'signed in' : 'signed out');
             setUser(firebaseUser);
         });
 
         // Clean up listener on unmount
         return () => {
-            console.log("Cleaning up auth state listener");
+            if (__DEV__) console.log("Cleaning up auth state listener");
             unsubscribe();
         };
     }, [firebaseInstance.auth]);

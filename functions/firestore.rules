@@ -30,6 +30,21 @@ service cloud.firestore {
       return text is string && text.size() > 0 && text.size() <= maxLen;
     }
 
+    function isValidPreferences(preferences) {
+      return preferences is map &&
+             preferences.keys().hasOnly(['theme', 'fontSize', 'reminders', 'reminderTime']) &&
+             preferences.theme in ['light', 'dark', 'sepia'] &&
+             preferences.fontSize in ['small', 'medium', 'large'] &&
+             (!preferences.keys().hasAny(['reminders']) || preferences.reminders is bool) &&
+             (!preferences.keys().hasAny(['reminderTime']) ||
+              (preferences.reminderTime is string && preferences.reminderTime.size() <= 5));
+    }
+
+    function changesOwnLike(previousLikes, nextLikes) {
+      return nextLikes.toSet().difference(previousLikes.toSet()).hasOnly([request.auth.uid]) &&
+             previousLikes.toSet().difference(nextLikes.toSet()).hasOnly([request.auth.uid]);
+    }
+
     // The username written on a post/comment must match the caller's actual
     // profile username. Without this, any user could post as "PastorJohn" or
     // impersonate another member. If the profile doc doesn't exist yet (first
@@ -75,9 +90,11 @@ service cloud.firestore {
 
     // =================== USER DATA ===================
 
-    // User profiles - users can only read/write their own data
+    // User documents contain server-managed payment metadata. Clients may read
+    // their own document, but only Cloud Functions may write it.
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read: if isOwner(userId);
+      allow write: if false;
 
       // Favorites collection - users can only access their own favorites
       match /favorites/{favoriteId} {
@@ -105,9 +122,22 @@ service cloud.firestore {
         // claiming ownership of someone else's existing anonymous prayer and
         // then editing or deleting it.
         allow create: if isOwner(userId) &&
+                        request.resource.data.keys().hasOnly(['prayerId', 'createdAt']) &&
+                        request.resource.data.prayerId == prayerId &&
+                        request.resource.data.createdAt == request.time &&
                         !exists(/databases/$(database)/documents/prayers/$(prayerId)) &&
                         getAfter(/databases/$(database)/documents/prayers/$(prayerId)).data.isAnonymous == true &&
                         getAfter(/databases/$(database)/documents/prayers/$(prayerId)).data.userId == null;
+        allow delete: if isOwner(userId);
+      }
+
+      match /blockedUsers/{targetUserId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                        request.resource.data.keys().hasOnly(['blockedUserId', 'blockedAt']) &&
+                        request.resource.data.blockedUserId == targetUserId &&
+                        request.resource.data.blockedAt == request.time;
+        allow update: if false;
         allow delete: if isOwner(userId);
       }
     }
@@ -123,17 +153,23 @@ service cloud.firestore {
       // documents, so no cross-user profile lookup is required.
       allow read: if isOwner(userId);
 
-      // Only the user can write to their own profile
+      // Clients may create and update only their non-sensitive profile fields.
+      // Premium entitlement is written exclusively by the Admin SDK.
       allow create: if isOwner(userId) &&
+                      request.resource.data.keys().hasOnly(['userId', 'email', 'username', 'displayName', 'photoURL', 'createdAt', 'preferences']) &&
                       request.resource.data.userId == userId &&
-                      isValidLength(request.resource.data.username, 3, 30);
+                      request.resource.data.email == request.auth.token.email &&
+                      isValidLength(request.resource.data.username, 3, 30) &&
+                      request.resource.data.createdAt is timestamp &&
+                      isValidPreferences(request.resource.data.preferences);
 
       allow update: if isOwner(userId) &&
-                      // Prevent changing userId
                       request.resource.data.userId == resource.data.userId &&
-                      // Validate username if being updated
-                      (!request.resource.data.keys().hasAny(['username']) ||
-                       isValidLength(request.resource.data.username, 3, 30));
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username', 'displayName', 'photoURL', 'preferences']) &&
+                      (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['username']) ||
+                       isValidLength(request.resource.data.username, 3, 30)) &&
+                      (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['preferences']) ||
+                       isValidPreferences(request.resource.data.preferences));
 
       allow delete: if isOwner(userId);
     }
@@ -145,6 +181,19 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       // Write only via Cloud Functions (admin SDK)
       allow write: if false;
+    }
+
+    match /reports/{reportId} {
+      allow read, update, delete: if false;
+      allow create: if isAuthenticated() &&
+                      request.resource.data.keys().hasOnly(['reporterId', 'contentType', 'contentId', 'authorId', 'reason', 'createdAt', 'status']) &&
+                      request.resource.data.reporterId == request.auth.uid &&
+                      request.resource.data.contentType in ['prayer', 'discussion', 'comment', 'user'] &&
+                      isValidLength(request.resource.data.contentId, 1, 128) &&
+                      (request.resource.data.authorId == null || isValidLength(request.resource.data.authorId, 1, 128)) &&
+                      isValidLength(request.resource.data.reason, 1, 100) &&
+                      request.resource.data.status == 'pending' &&
+                      request.resource.data.createdAt == request.time;
     }
 
     // =================== PRAYERS ===================
@@ -183,7 +232,8 @@ service cloud.firestore {
                          getAfter(/databases/$(database)/documents/users/$(request.auth.uid)/ownedPrayers/$(prayerId)).data.prayerId == prayerId)
                       );
 
-      // Owner can update their own prayers (except likedBy/commentCount which have special rules)
+      // Owners may edit content and mark their prayer answered, but cannot
+      // alter ownership, anonymity, likes, or server-managed counters.
       allow update: if isAuthenticated() &&
                       // Non-anonymous owner -or- anonymous prayer owner (verified via private subcollection)
                       (resource.data.userId == request.auth.uid ||
@@ -192,26 +242,22 @@ service cloud.firestore {
                       request.resource.data.userId == resource.data.userId &&
                       // Prevent changing username after creation (impersonation)
                       request.resource.data.username == resource.data.username &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'answered']) &&
                       // Validate text if being updated
                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
-                       isValidContent(request.resource.data.text, 2000));
+                       isValidContent(request.resource.data.text, 2000)) &&
+                      (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['answered']) ||
+                       request.resource.data.answered is bool);
 
       // Owner can delete their own prayers
       allow delete: if isAuthenticated() &&
                       (resource.data.userId == request.auth.uid ||
                        (resource.data.get('isAnonymous', false) == true && isAnonymousPrayerOwner(prayerId)));
 
-      // Special case for liking prayers - only likedBy may change; user can only add/remove themselves
+      // A user can only add or remove their own like.
       allow update: if isAuthenticated() &&
                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy']) &&
-                      (request.resource.data.likedBy.toSet().difference(resource.data.likedBy.toSet()).size() <= 1) &&
-                      (resource.data.likedBy.toSet().difference(request.resource.data.likedBy.toSet()).size() <= 1);
-
-      // commentCount may only be incremented or decremented by exactly 1 (e.g. when adding/removing a comment)
-      allow update: if isAuthenticated() &&
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']) &&
-                      (request.resource.data.commentCount == resource.data.commentCount + 1 ||
-                       request.resource.data.commentCount == resource.data.commentCount - 1);
+                      changesOwnLike(resource.data.likedBy, request.resource.data.likedBy);
 
       // Comments subcollection
       match /comments/{commentId} {
@@ -222,6 +268,8 @@ service cloud.firestore {
                         request.resource.data.userId == request.auth.uid &&
                         // Validate required fields
                         request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                        request.resource.data.keys().hasOnly(['text', 'userId', 'username', 'createdAt']) &&
+                        request.resource.data.createdAt == request.time &&
                         // Validate content length (max 500 chars)
                         isValidContent(request.resource.data.text, 500) &&
                         // Validate username and require it to match the caller's profile
@@ -231,9 +279,7 @@ service cloud.firestore {
         // Only the comment creator can update or delete their comment
         allow update: if isAuthenticated() &&
                         resource.data.userId == request.auth.uid &&
-                        // Prevent changing userId
-                        request.resource.data.userId == resource.data.userId &&
-                        // Validate text if being updated
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text']) &&
                         isValidContent(request.resource.data.text, 500);
 
         // A comment can be deleted by its author, or by the owner of the parent
@@ -273,13 +319,14 @@ service cloud.firestore {
                       // Ensure commentCount starts at 0
                       request.resource.data.commentCount == 0;
 
-      // Owner can update or delete their own discussions
+      // Owners can edit only the text of their discussions.
       allow update: if isAuthenticated() &&
                       resource.data.userId == request.auth.uid &&
                       // Prevent changing userId
                       request.resource.data.userId == resource.data.userId &&
                       // Prevent changing username after creation (impersonation)
                       request.resource.data.username == resource.data.username &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text']) &&
                       // Validate text if being updated
                       (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['text']) ||
                        isValidContent(request.resource.data.text, 2000));
@@ -287,17 +334,10 @@ service cloud.firestore {
       allow delete: if isAuthenticated() &&
                       resource.data.userId == request.auth.uid;
 
-      // Special case for liking discussions - only likedBy may change; user can only add/remove themselves
+      // A user can only add or remove their own like.
       allow update: if isAuthenticated() &&
                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likedBy']) &&
-                      (request.resource.data.likedBy.toSet().difference(resource.data.likedBy.toSet()).size() <= 1) &&
-                      (resource.data.likedBy.toSet().difference(request.resource.data.likedBy.toSet()).size() <= 1);
-
-      // commentCount may only be incremented or decremented by exactly 1
-      allow update: if isAuthenticated() &&
-                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']) &&
-                      (request.resource.data.commentCount == resource.data.commentCount + 1 ||
-                       request.resource.data.commentCount == resource.data.commentCount - 1);
+                      changesOwnLike(resource.data.likedBy, request.resource.data.likedBy);
 
       // Comments subcollection
       match /comments/{commentId} {
@@ -308,6 +348,8 @@ service cloud.firestore {
                         request.resource.data.userId == request.auth.uid &&
                         // Validate required fields
                         request.resource.data.keys().hasAll(['text', 'userId', 'username', 'createdAt']) &&
+                        request.resource.data.keys().hasOnly(['text', 'userId', 'username', 'createdAt']) &&
+                        request.resource.data.createdAt == request.time &&
                         // Validate content length (max 500 chars)
                         isValidContent(request.resource.data.text, 500) &&
                         // Validate username and require it to match the caller's profile
@@ -317,9 +359,7 @@ service cloud.firestore {
         // Only the comment creator can update or delete their comment
         allow update: if isAuthenticated() &&
                         resource.data.userId == request.auth.uid &&
-                        // Prevent changing userId
-                        request.resource.data.userId == resource.data.userId &&
-                        // Validate text if being updated
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text']) &&
                         isValidContent(request.resource.data.text, 500);
 
         // A comment can be deleted by its author, or by the owner of the parent

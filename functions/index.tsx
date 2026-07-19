@@ -1,6 +1,6 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onRequest } from 'firebase-functions/v2/https';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onDocumentCreated, onDocumentDeleted } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import Stripe from 'stripe';
 import * as nodemailer from 'nodemailer';
@@ -58,8 +58,54 @@ function getEmailTransport(): ReturnType<typeof nodemailer.createTransport> {
 // =================== SUBSCRIPTION FUNCTIONS ===================
 
 interface CreateSubscriptionData {
-    planId: string;
-    paymentMethodId: string;
+  planId: string;
+  paymentMethodId: string;
+}
+
+function isEntitledSubscription(status: Stripe.Subscription.Status): boolean {
+    return status === 'active' || status === 'trialing';
+}
+
+async function getOrCreateStripeCustomer(
+    userId: string,
+    email: string,
+    paymentMethodId: string
+): Promise<string> {
+    const stripe = getStripe();
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+    const storedCustomerId = (await admin.firestore().collection('users').doc(userId).get()).data()?.stripeCustomerId;
+
+    if (storedCustomerId) {
+        const existing = await stripe.customers.retrieve(storedCustomerId);
+        if (!existing.deleted && existing.metadata.userId === userId) {
+            if (paymentMethod.customer && paymentMethod.customer !== storedCustomerId) {
+                throw new HttpsError('permission-denied', 'Payment method belongs to another customer');
+            }
+            if (!paymentMethod.customer) {
+                await stripe.paymentMethods.attach(paymentMethodId, { customer: storedCustomerId });
+            }
+            await stripe.customers.update(storedCustomerId, {
+                invoice_settings: { default_payment_method: paymentMethodId },
+            });
+            return storedCustomerId;
+        }
+    }
+
+    if (paymentMethod.customer) {
+        throw new HttpsError('permission-denied', 'Payment method belongs to another customer');
+    }
+
+    const customer = await stripe.customers.create({
+        email,
+        payment_method: paymentMethodId,
+        invoice_settings: { default_payment_method: paymentMethodId },
+        metadata: { userId },
+    });
+    await admin.firestore().collection('users').doc(userId).set(
+        { stripeCustomerId: customer.id },
+        { merge: true }
+    );
+    return customer.id;
 }
 
 export const createSubscription = onCall<CreateSubscriptionData>(
@@ -103,39 +149,28 @@ export const createSubscription = onCall<CreateSubscriptionData>(
                 throw new HttpsError('internal', 'Subscription plan is not configured. Please contact support.');
             }
 
-            // Check if customer exists in Firestore
-            const userDoc = await admin.firestore().collection('users').doc(userId).get();
-            let customerId = userDoc.data()?.stripeCustomerId;
-
-            if (!customerId) {
-                // Create new Stripe customer
-                const customer = await getStripe().customers.create({
-                    email: customerEmail,
-                    payment_method: paymentMethodId,
-                    invoice_settings: { default_payment_method: paymentMethodId },
-                    metadata: { userId },
-                });
-                customerId = customer.id;
-
-                // Save to Firestore
-                await admin.firestore().collection('users').doc(userId).set(
-                    { stripeCustomerId: customerId },
-                    { merge: true }
-                );
-            } else {
-                // Update existing customer payment method
-                await getStripe().paymentMethods.attach(paymentMethodId, { customer: customerId });
-                await getStripe().customers.update(customerId, {
-                    invoice_settings: { default_payment_method: paymentMethodId },
-                });
+            if (typeof paymentMethodId !== 'string' || !paymentMethodId.startsWith('pm_')) {
+                throw new HttpsError('invalid-argument', 'Invalid payment method');
             }
 
-            // Create subscription
+            const existingSubscription = await admin.firestore().collection('subscriptions').doc(userId).get();
+            const existingStatus = existingSubscription.data()?.status as string | undefined;
+            if (existingStatus && !['canceled', 'incomplete_expired'].includes(existingStatus)) {
+                throw new HttpsError('already-exists', 'An existing subscription must be managed before creating another');
+            }
+
+            const customerId = await getOrCreateStripeCustomer(userId, customerEmail, paymentMethodId);
+
+            // Let Stripe determine the initial status. In particular, an
+            // incomplete subscription must never grant access before SCA or
+            // other payment confirmation succeeds.
             const subscription = await getStripe().subscriptions.create({
                 customer: customerId,
                 items: [{ price: plan.priceId }],
                 expand: ['latest_invoice.payment_intent'],
                 metadata: { userId, planId },
+                payment_behavior: 'default_incomplete',
+                payment_settings: { save_default_payment_method: 'on_subscription' },
             });
 
             // Use Stripe's actual billing period end as the source of truth
@@ -150,33 +185,33 @@ export const createSubscription = onCall<CreateSubscriptionData>(
             await admin.firestore().collection('subscriptions').doc(userId).set({
                 userId,
                 planId,
-                status: 'active',
+                status: subscription.status,
                 stripeSubscriptionId: subscription.id,
                 stripeCustomerId: customerId,
                 startDate: admin.firestore.Timestamp.now(),
                 endDate: admin.firestore.Timestamp.fromDate(endDate),
+                currentPeriodEnd: admin.firestore.Timestamp.fromDate(endDate),
                 autoRenew: true,
-                paymentMethod: {
-                    id: paymentMethodId,
-                    type: 'credit_card',
-                },
             });
 
-            // Update user profile premium status (set+merge: must not fail if
-            // the profile doc hasn't been created yet)
-            await admin.firestore().collection('userProfiles').doc(userId).set({
-                isPremium: true,
-                premiumPlan: planId,
-                premiumExpiry: admin.firestore.Timestamp.fromDate(endDate),
-                premiumUpdatedAt: admin.firestore.Timestamp.now(),
-            }, { merge: true });
+            await syncPremiumStatus(
+                userId,
+                isEntitledSubscription(subscription.status),
+                planId,
+                endDate
+            );
+
+            const invoice = subscription.latest_invoice as unknown as { payment_intent?: { client_secret?: string | null } | null } | null;
 
             return {
                 subscriptionId: subscription.id,
                 stripeCustomerId: customerId,
+                status: subscription.status,
+                clientSecret: invoice?.payment_intent?.client_secret ?? null,
             };
         } catch (error: any) {
             console.error('Subscription creation failed:', error);
+            if (error instanceof HttpsError) throw error;
             throw new HttpsError('internal', 'Subscription creation failed. Please try again.');
         }
     }
@@ -202,6 +237,11 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
         if (!request.auth) {
             throw new HttpsError('unauthenticated', 'Must be logged in');
         }
+
+        // Legacy clients used this callable to choose arbitrary amounts. It is
+        // deliberately disabled; all supported payments use fixed Stripe Price
+        // IDs through createSubscription.
+        throw new HttpsError('failed-precondition', 'One-time payments are not available');
 
         const { amount, currency, paymentMethodId, description, metadata, receiptEmail } = request.data;
 
@@ -725,6 +765,20 @@ export const stripeWebhook = onRequest(
             return;
         }
 
+        // Idempotency: Stripe retries webhook delivery, and repeated processing
+        // would resend receipt emails and repeat side effects. create() fails
+        // atomically if the doc already exists, so each event runs exactly once.
+        try {
+            await admin.firestore().collection('processedWebhookEvents').doc(event.id).create({
+                type: event.type,
+                processedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+        } catch (err) {
+            console.log(`Webhook event ${event.id} already processed, skipping.`);
+            response.json({ received: true, duplicate: true });
+            return;
+        }
+
         // Handle the event
         try {
             switch (event.type) {
@@ -738,10 +792,15 @@ export const stripeWebhook = onRequest(
                         // API version 2024-09-30+ but the field is still present in the
                         // response object at runtime. Cast via unknown to satisfy the compiler.
                         const periodEnd = (subscription as unknown as { current_period_end: number }).current_period_end;
+                        const endDate = new Date(periodEnd * 1000);
 
                         await admin.firestore().collection('subscriptions').doc(userId).set({
                             status: subscription.status,
-                            currentPeriodEnd: new Date(periodEnd * 1000),
+                            // endDate is the field every entitlement check reads;
+                            // writing only currentPeriodEnd here caused renewed
+                            // subscriptions to look expired after their first period.
+                            endDate: admin.firestore.Timestamp.fromDate(endDate),
+                            currentPeriodEnd: admin.firestore.Timestamp.fromDate(endDate),
                             cancelAtPeriodEnd: subscription.cancel_at_period_end,
                             planId: subscription.metadata.planId,
                             stripeSubscriptionId: subscription.id,
@@ -751,12 +810,12 @@ export const stripeWebhook = onRequest(
 
                         // Update user profile premium status (set+merge: webhook can
                         // fire before the profile trigger has created the doc)
-                        await admin.firestore().collection('userProfiles').doc(userId).set({
-                            isPremium: subscription.status === 'active',
-                            premiumPlan: subscription.metadata.planId,
-                            premiumExpiry: admin.firestore.Timestamp.fromDate(new Date(periodEnd * 1000)),
-                            premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        }, { merge: true });
+                        await syncPremiumStatus(
+                            userId,
+                            isEntitledSubscription(subscription.status),
+                            subscription.metadata.planId,
+                            endDate
+                        );
                     }
                     break;
                 }
@@ -766,18 +825,13 @@ export const stripeWebhook = onRequest(
                     const userId = subscription.metadata.userId;
 
                     if (userId) {
-                        await admin.firestore().collection('subscriptions').doc(userId).update({
+                        await admin.firestore().collection('subscriptions').doc(userId).set({
                             status: 'canceled',
                             canceledAt: admin.firestore.FieldValue.serverTimestamp(),
-                        });
+                        }, { merge: true });
 
                         // Update user profile premium status (set+merge)
-                        await admin.firestore().collection('userProfiles').doc(userId).set({
-                            isPremium: false,
-                            premiumPlan: null,
-                            premiumExpiry: null,
-                            premiumUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        }, { merge: true });
+                        await syncPremiumStatus(userId, false);
                     }
                     break;
                 }
@@ -822,10 +876,10 @@ export const stripeWebhook = onRequest(
                         const userId = usersSnapshot.docs[0].id;
 
                         // Update subscription status
-                        await admin.firestore().collection('subscriptions').doc(userId).update({
+                        await admin.firestore().collection('subscriptions').doc(userId).set({
                             paymentStatus: 'failed',
                             lastPaymentFailure: admin.firestore.FieldValue.serverTimestamp(),
-                        });
+                        }, { merge: true });
                     }
                     break;
                 }

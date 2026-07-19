@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { User } from 'firebase/auth';
 import { db } from './firebaseReactNative';
 import { validateUsername } from '../../utils/inputValidation';
@@ -37,7 +37,6 @@ export async function createUserProfile(user: User): Promise<UserProfile> {
     displayName: user.displayName || '',
     photoURL: user.photoURL || '',
     createdAt: new Date(),
-    isPremium: false, // Default to non-premium
     preferences: {
       theme: 'light',
       fontSize: 'medium'
@@ -73,13 +72,8 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       const now = new Date();
 
       if (expiryDate < now) {
-        // Premium has expired, update status to non-premium
-        // But don't block the current request with await
-        updateUserPremiumStatus(userId, false).catch(error => {
-          console.error("Error updating expired premium status:", error);
-        });
-
-        // Update returned profile
+        // Premium entitlement is server-managed. Never try to correct it from
+        // the client; only present this stale cached value as inactive.
         profile.isPremium = false;
       }
     }
@@ -127,97 +121,3 @@ export async function updateUserPreferences(
   await updateDoc(profileRef, { preferences: updatedPreferences });
 }
 
-/**
- * Set or update user's premium status
- * @param userId User ID
- * @param isPremium Whether user has premium access
- * @param planId Optional plan ID (e.g., 'monthly_basic', 'yearly_premium')
- * @param expiryDate Optional expiry date for the premium access
- * @param transactionId Optional transaction ID for tracking payments
- */
-export async function updateUserPremiumStatus(
-  userId: string,
-  isPremium: boolean,
-  planId?: string,
-  expiryDate?: Date,
-  transactionId?: string
-): Promise<void> {
-  if (!db) throw new Error('Database not available');
-
-  const profileRef = doc(db, 'userProfiles', userId);
-
-  // Get current profile to ensure it exists
-  const profileDoc = await getDoc(profileRef);
-  if (!profileDoc.exists()) {
-    throw new Error('User profile not found');
-  }
-
-  // Prepare update data
-  const updateData: Partial<UserProfile> = {
-    isPremium,
-    premiumUpdatedAt: Timestamp.now()
-  };
-
-  // Add optional fields if provided
-  if (planId) {
-    updateData.premiumPlan = planId;
-  }
-
-  if (expiryDate) {
-    updateData.premiumExpiry = Timestamp.fromDate(expiryDate);
-  } else if (isPremium) {
-    // Default expiry to 30 days from now if not provided but user is premium
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-    updateData.premiumExpiry = Timestamp.fromDate(thirtyDaysFromNow);
-  } else {
-    // If removing premium, clear expiry
-    updateData.premiumExpiry = undefined;
-    updateData.premiumPlan = undefined;
-  }
-
-  if (transactionId) {
-    updateData.premiumTransactionId = transactionId;
-  }
-
-  await updateDoc(profileRef, updateData);
-}
-
-/**
- * Check if user's premium subscription is active
- * @param userId User ID
- * @returns Whether user has active premium status
- */
-export async function checkPremiumStatus(userId: string): Promise<boolean> {
-  const profile = await getUserProfile(userId);
-
-  if (!profile) {
-    return false;
-  }
-
-  // getUserProfile already checks for expired premium status
-  return !!profile.isPremium;
-}
-
-/**
- * Get premium subscription details
- * @param userId User ID 
- * @returns Premium details or null if not premium
- */
-export async function getPremiumDetails(userId: string): Promise<{
-  isPremium: boolean;
-  plan?: string;
-  expiryDate?: Date;
-} | null> {
-  const profile = await getUserProfile(userId);
-
-  if (!profile || !profile.isPremium) {
-    return { isPremium: false };
-  }
-
-  return {
-    isPremium: true,
-    plan: profile.premiumPlan,
-    expiryDate: profile.premiumExpiry ? profile.premiumExpiry.toDate() : undefined
-  };
-}
