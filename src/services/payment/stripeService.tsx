@@ -92,6 +92,8 @@ export async function createSubscription(
 ): Promise<{
     success: boolean;
     subscriptionId?: string;
+    status?: string;
+    clientSecret?: string | null;
     error?: string;
 }> {
     try {
@@ -109,7 +111,9 @@ export async function createSubscription(
 
         return {
             success: true,
-            subscriptionId: data.subscriptionId
+            subscriptionId: data.subscriptionId,
+            status: data.status,
+            clientSecret: data.clientSecret,
         };
     } catch (error: any) {
         console.error('Error creating subscription:', error);

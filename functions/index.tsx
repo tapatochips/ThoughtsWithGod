@@ -242,54 +242,6 @@ export const createPaymentIntent = onCall<PaymentIntentData>(
         // deliberately disabled; all supported payments use fixed Stripe Price
         // IDs through createSubscription.
         throw new HttpsError('failed-precondition', 'One-time payments are not available');
-
-        const { amount, currency, paymentMethodId, description, metadata, receiptEmail } = request.data;
-
-        // Validate client-supplied inputs — never trust arbitrary amounts.
-        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 || amount > 500) {
-            throw new HttpsError('invalid-argument', 'Invalid payment amount');
-        }
-        if (currency !== 'usd') {
-            throw new HttpsError('invalid-argument', 'Unsupported currency');
-        }
-        if (typeof paymentMethodId !== 'string' || !paymentMethodId.startsWith('pm_')) {
-            throw new HttpsError('invalid-argument', 'Invalid payment method');
-        }
-        if (typeof description !== 'string' || description.length === 0 || description.length > 200) {
-            throw new HttpsError('invalid-argument', 'Invalid description');
-        }
-        // Receipts go to the verified account email only — ignore client-supplied
-        // receiptEmail, which could be used to spam arbitrary addresses with
-        // Stripe receipts.
-        const verifiedReceiptEmail = request.auth.token.email;
-        void receiptEmail;
-
-        try {
-            const paymentIntent = await getStripe().paymentIntents.create({
-                amount: Math.round(amount * 100), // Convert to cents
-                currency,
-                payment_method: paymentMethodId,
-                confirm: true,
-                automatic_payment_methods: {
-                    enabled: true,
-                    allow_redirects: 'never'
-                },
-                description,
-                metadata: {
-                    ...metadata,
-                    userId: request.auth.uid,
-                },
-                receipt_email: verifiedReceiptEmail,
-            });
-
-            return {
-                clientSecret: paymentIntent.client_secret,
-                transactionId: paymentIntent.id,
-            };
-        } catch (error: any) {
-            console.error('Payment intent creation failed:', error);
-            throw new HttpsError('internal', 'Payment processing failed. Please try again.');
-        }
     }
 );
 

@@ -30,7 +30,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
   const { theme } = useTheme();
   const { user, refreshPremiumStatus } = useFirebase();
 
-  const { createPaymentMethod } = useStripe();
+  const { createPaymentMethod, confirmPayment } = useStripe();
   const [selectedPlan, setSelectedPlan] = useState(subscriptionPlans[0]);
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -84,23 +84,47 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
         paymentMethod.id
       );
 
-      if (result.success) {
-        Alert.alert(
-          'Success!',
-          'Your subscription has been activated. Thank you for your support!',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                refreshPremiumStatus();
-                navigation.goBack();
-              }
-            }
-          ]
-        );
-      } else {
+      if (!result.success) {
         Alert.alert('Payment Failed', result.error || 'Please try again.');
+        setProcessing(false);
+        return;
       }
+
+      // Subscriptions are created with payment_behavior: 'default_incomplete',
+      // so the first invoice's PaymentIntent is not charged automatically —
+      // it must be confirmed client-side (this is also where SCA/3DS challenges
+      // are presented) before the subscription becomes active.
+      if (result.status !== 'active' && result.status !== 'trialing') {
+        if (!result.clientSecret) {
+          Alert.alert('Payment Failed', 'Could not confirm your payment. Please try again.');
+          setProcessing(false);
+          return;
+        }
+
+        const { paymentIntent, error: confirmError } = await confirmPayment(result.clientSecret, {
+          paymentMethodType: 'Card',
+        });
+
+        if (confirmError || paymentIntent?.status !== 'Succeeded') {
+          Alert.alert('Payment Failed', confirmError?.message || 'Could not confirm your payment. Please try again.');
+          setProcessing(false);
+          return;
+        }
+      }
+
+      Alert.alert(
+        'Success!',
+        'Your subscription has been activated. Thank you for your support!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              refreshPremiumStatus();
+              navigation.goBack();
+            }
+          }
+        ]
+      );
     } catch (error) {
       console.error('Error processing subscription:', error);
       Alert.alert('Error', 'An error occurred while processing your payment.');
