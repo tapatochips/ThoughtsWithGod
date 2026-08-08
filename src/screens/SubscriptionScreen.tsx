@@ -15,13 +15,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeProvider';
 import { useFirebase } from '../context/FirebaseContext';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
+import { subscriptionPlans, validateSubscription, isApplePlatform } from '../services/payment/paymentProvider';
 import {
-  subscriptionPlans,
   createSubscription,
-  validateSubscription,
   cancelSubscription,
   cancelIncompleteSubscription
 } from '../services/payment/stripeService';
+import {
+  getOfferings,
+  purchasePackage,
+  restorePurchases,
+  openManageSubscriptions
+} from '../services/payment/revenueCatService';
 
 interface SubscriptionScreenProps {
   navigation: NavigationProp<ParamListBase>;
@@ -138,7 +143,87 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
     }
   };
 
+  const handleSubscribeApple = async () => {
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to subscribe.');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const packages = await getOfferings();
+      const pkg = packages.find(p => p.product.identifier === selectedPlan.appleProductId);
+
+      if (!pkg) {
+        Alert.alert('Payment Failed', 'This plan is not currently available. Please try again later.');
+        setProcessing(false);
+        return;
+      }
+
+      const result = await purchasePackage(pkg);
+
+      if (result.userCancelled) {
+        setProcessing(false);
+        return;
+      }
+
+      if (!result.success) {
+        Alert.alert('Payment Failed', result.error || 'Please try again.');
+        setProcessing(false);
+        return;
+      }
+
+      Alert.alert(
+        'Success!',
+        'Your subscription has been activated. Thank you for your support!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Firestore is populated by the RevenueCat webhook asynchronously,
+              // so a short retry gives it time to land before the app navigates
+              // away and the premium UI is checked again.
+              refreshPremiumStatus();
+              setTimeout(() => refreshPremiumStatus(), 1500);
+              navigation.goBack();
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error processing Apple subscription:', error);
+      Alert.alert('Error', 'An error occurred while processing your payment.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleRestorePurchases = async () => {
+    setProcessing(true);
+    try {
+      const result = await restorePurchases();
+      if (result.success && result.active) {
+        Alert.alert('Restored', 'Your subscription has been restored.');
+        refreshPremiumStatus();
+        await checkCurrentSubscription();
+      } else {
+        Alert.alert('No Purchases Found', 'We could not find a previous purchase to restore.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'An error occurred while restoring your purchases.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleCancelSubscription = async () => {
+    if (isApplePlatform) {
+      // Apple subscriptions can only be canceled through Apple's own UI.
+      openManageSubscriptions();
+      return;
+    }
+
     Alert.alert(
       'Cancel Subscription',
       'Are you sure you want to cancel your subscription? You will continue to have access until the end of your billing period.',
@@ -239,9 +324,13 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
                 <ActivityIndicator size="small" color={theme.colors.danger} />
               ) : (
                 <>
-                  <Ionicons name="close-circle-outline" size={20} color={theme.colors.danger} />
+                  <Ionicons
+                    name={isApplePlatform ? 'open-outline' : 'close-circle-outline'}
+                    size={20}
+                    color={theme.colors.danger}
+                  />
                   <Text style={[styles.cancelButtonText, { color: theme.colors.danger }]}>
-                    Cancel Subscription
+                    {isApplePlatform ? 'Manage in App Store' : 'Cancel Subscription'}
                   </Text>
                 </>
               )}
@@ -310,8 +399,42 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
             </TouchableOpacity>
           ))}
 
-          {/* Continue Button or Payment Form */}
-          {!showPaymentForm ? (
+          {/* Continue Button, Apple Subscribe Button, or Stripe Payment Form */}
+          {isApplePlatform ? (
+            <View style={[styles.paymentForm, {
+              backgroundColor: theme.colors.card,
+              ...getShadowStyle(theme)
+            }]}>
+              <Text style={[styles.selectedPlanText, { color: theme.colors.textSecondary }]}>
+                {selectedPlan.name} - ${selectedPlan.price.toFixed(2)}
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.payButton, { backgroundColor: theme.colors.primary, width: '100%' }]}
+                onPress={handleSubscribeApple}
+                disabled={processing}
+              >
+                {processing ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-apple" size={20} color="white" />
+                    <Text style={styles.payButtonText}>Subscribe with Apple</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.restoreButton}
+                onPress={handleRestorePurchases}
+                disabled={processing}
+              >
+                <Text style={[styles.restoreButtonText, { color: theme.colors.primary }]}>
+                  Restore Purchases
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : !showPaymentForm ? (
             <TouchableOpacity
               style={[styles.subscribeButton, { backgroundColor: theme.colors.primary }]}
               onPress={() => setShowPaymentForm(true)}
@@ -519,6 +642,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
     marginTop: 16,
+  },
+  restoreButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  restoreButtonText: {
+    fontWeight: '600',
+    fontSize: 14,
   },
   supportInfo: {
     flexDirection: 'row',

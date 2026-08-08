@@ -9,8 +9,11 @@ const getEnvironment = () => {
     FIREBASE_APP_ID: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
     FIREBASE_MEASUREMENT_ID: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
     
-    // Stripe configuration
+    // Stripe configuration (Android)
     STRIPE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+
+    // RevenueCat configuration (iOS)
+    REVENUECAT_IOS_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
   };
 };
 

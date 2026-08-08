@@ -2,15 +2,8 @@ import { httpsCallable } from 'firebase/functions';
 import { functions } from '../firebase/firebaseFunctions';
 import Constants from 'expo-constants';
 
-export interface SubscriptionPlan {
-    id: string;
-    name: string;
-    description: string;
-    price: number;
-    priceId?: string; // Stripe Price ID
-    features: string[];
-    durationMonths: number;
-}
+export type { SubscriptionPlan } from './subscriptionPlans';
+export { subscriptionPlans } from './subscriptionPlans';
 
 export interface PaymentMethod {
     id: string;
@@ -20,56 +13,6 @@ export interface PaymentMethod {
 
 // Get Stripe publishable key from config
 export const STRIPE_PUBLISHABLE_KEY = Constants.expoConfig?.extra?.STRIPE_PUBLISHABLE_KEY || '';
-
-// Available subscription plans.
-//
-// SINGLE SOURCE OF TRUTH for client-side plan display.
-// IMPORTANT: `id` values MUST match the keys in the Cloud Function's planPrices
-// map (functions/index.tsx). The actual charge amount comes from the Stripe
-// Price object referenced by the server-side secret for each plan — the
-// `price` field here is display-only and should match your Stripe dashboard.
-export const subscriptionPlans: SubscriptionPlan[] = [
-    {
-        id: 'monthly_basic',
-        name: 'Monthly Tier 1',
-        description: 'Want to support us?',
-        price: 4.99,
-        features: [
-            'This plan helps keep the app running!'
-        ],
-        durationMonths: 1
-    },
-    {
-        id: 'monthly_premium',
-        name: 'Monthly Tier 2',
-        description: 'Support the app with a higher tier subscription, thank you!',
-        price: 9.99,
-        features: [
-            'Want to support us more? Choose this plan!',
-        ],
-        durationMonths: 1
-    },
-    {
-        id: 'monthly_pro',
-        name: 'Monthly Tier 3',
-        description: 'Our most generous monthly support tier, thank you so much!',
-        price: 20.00,
-        features: [
-            'Want to support us even more? Choose this plan!',
-        ],
-        durationMonths: 1
-    },
-    {
-        id: 'yearly_premium',
-        name: 'Yearly Premium',
-        description: 'Our best value yearly plan',
-        price: 99.99,
-        features: [
-            'Want to support us even more? Choose this plan!',
-        ],
-        durationMonths: 12
-    }
-];
 
 // IMPORTANT: Payment methods must be created client-side using @stripe/stripe-react-native
 // for PCI-DSS compliance. Never pass raw card details through your server.

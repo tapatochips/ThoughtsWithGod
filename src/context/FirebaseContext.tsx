@@ -9,7 +9,8 @@ import {
     createUserProfile,
     getUserProfile
 } from '../services/firebase/userProfile';
-import { validateSubscription } from '../services/payment/stripeService';
+import { validateSubscription, isApplePlatform } from '../services/payment/paymentProvider';
+import { configureRevenueCat } from '../services/payment/revenueCatService';
 
 interface FirebaseContextType {
     app: FirebaseApp | null;
@@ -93,6 +94,10 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
         const fetchUserProfile = async () => {
             if (user && firebaseInstance.db) {
                 try {
+                    if (isApplePlatform) {
+                        configureRevenueCat(user.uid);
+                    }
+
                     // Create profile if it doesn't exist, or get existing one
                     const profile = await createUserProfile(user);
                     setUserProfile(profile);
