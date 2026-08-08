@@ -142,6 +142,25 @@ export async function cancelSubscription(): Promise<boolean> {
     }
 }
 
+// Reset a subscription stuck in 'incomplete' after a failed payment
+// confirmation, so the user can immediately retry.
+export async function cancelIncompleteSubscription(): Promise<boolean> {
+    try {
+        if (!functions) {
+            console.error('Firebase functions not initialized');
+            return false;
+        }
+
+        const cancelIncompleteSubscriptionFunction = httpsCallable(functions, 'cancelIncompleteSubscription');
+        await cancelIncompleteSubscriptionFunction({});
+
+        return true;
+    } catch (error) {
+        console.error('Error canceling incomplete subscription:', error);
+        return false;
+    }
+}
+
 // Validate subscription status
 export async function validateSubscription(): Promise<{
     active: boolean;

@@ -71,7 +71,7 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({ children }) 
             void userId;
             const premiumDetails = await validateSubscription();
 
-            if (premiumDetails && premiumDetails.isPremium) {
+            if (premiumDetails && premiumDetails.active) {
                 setIsPremiumUser(true);
                 setPremiumPlan(premiumDetails.plan || null);
                 setPremiumExpiry(premiumDetails.endDate ? new Date(premiumDetails.endDate) : null);

@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createUserProfile = exports.deleteAccount = exports.stripeWebhook = exports.sendReceiptEmail = exports.checkPremiumAccess = exports.validateSubscription = exports.updateDefaultPaymentMethod = exports.getPaymentMethods = exports.toggleAutoRenew = exports.cancelSubscription = exports.createPaymentIntent = exports.createSubscription = void 0;
+exports.createUserProfile = exports.deleteAccount = exports.stripeWebhook = exports.sendReceiptEmail = exports.checkPremiumAccess = exports.validateSubscription = exports.updateDefaultPaymentMethod = exports.getPaymentMethods = exports.toggleAutoRenew = exports.cancelIncompleteSubscription = exports.cancelSubscription = exports.createPaymentIntent = exports.createSubscription = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const https_2 = require("firebase-functions/v2/https");
 const firestore_1 = require("firebase-functions/v2/firestore");
@@ -264,6 +264,56 @@ exports.cancelSubscription = (0, https_1.onCall)({
     catch (error) {
         console.error('Subscription cancellation failed:', error);
         throw new https_1.HttpsError('internal', 'Subscription cancellation failed. Please try again.');
+    }
+});
+// Reset a subscription stuck in 'incomplete' after a failed client-side
+// payment confirmation, so the user can immediately retry instead of being
+// blocked by createSubscription's already-exists guard until Stripe
+// auto-expires the PaymentIntent.
+exports.cancelIncompleteSubscription = (0, https_1.onCall)({
+    cors: getCorsConfig(),
+    secrets: ['STRIPE_SECRET_KEY'],
+}, async (request) => {
+    if (!request.auth) {
+        throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
+    }
+    const userId = request.auth.uid;
+    try {
+        const subscriptionDoc = await admin.firestore().collection('subscriptions').doc(userId).get();
+        if (!subscriptionDoc.exists) {
+            return { success: true };
+        }
+        const subscriptionData = subscriptionDoc.data();
+        const status = subscriptionData === null || subscriptionData === void 0 ? void 0 : subscriptionData.status;
+        // Only ever touch a genuinely stuck 'incomplete' subscription —
+        // never an active/trialing one (e.g. a concurrent webhook update).
+        if (status !== 'incomplete') {
+            return { success: true };
+        }
+        const stripeSubscriptionId = subscriptionData === null || subscriptionData === void 0 ? void 0 : subscriptionData.stripeSubscriptionId;
+        if (stripeSubscriptionId) {
+            try {
+                // Immediate cancellation, not cancel_at_period_end — an
+                // incomplete subscription was never paid, so there's no
+                // period to honor.
+                await getStripe().subscriptions.cancel(stripeSubscriptionId);
+            }
+            catch (stripeErr) {
+                // May already be canceled/expired on Stripe's side —
+                // don't block the Firestore reset on that.
+                console.error('cancelIncompleteSubscription: Stripe cancel error (continuing):', stripeErr);
+            }
+        }
+        await admin.firestore().collection('subscriptions').doc(userId).update({
+            status: 'incomplete_expired',
+            canceledAt: admin.firestore.Timestamp.now(),
+        });
+        await syncPremiumStatus(userId, false);
+        return { success: true };
+    }
+    catch (error) {
+        console.error('cancelIncompleteSubscription failed:', error);
+        throw new https_1.HttpsError('internal', 'Could not reset subscription. Please try again.');
     }
 });
 exports.toggleAutoRenew = (0, https_1.onCall)({

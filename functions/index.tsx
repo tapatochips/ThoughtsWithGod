@@ -298,6 +298,66 @@ export const cancelSubscription = onCall(
     }
 );
 
+// Reset a subscription stuck in 'incomplete' after a failed client-side
+// payment confirmation, so the user can immediately retry instead of being
+// blocked by createSubscription's already-exists guard until Stripe
+// auto-expires the PaymentIntent.
+export const cancelIncompleteSubscription = onCall(
+    {
+        cors: getCorsConfig(),
+        secrets: ['STRIPE_SECRET_KEY'],
+    },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError('unauthenticated', 'Must be logged in');
+        }
+
+        const userId = request.auth.uid;
+
+        try {
+            const subscriptionDoc = await admin.firestore().collection('subscriptions').doc(userId).get();
+            if (!subscriptionDoc.exists) {
+                return { success: true };
+            }
+
+            const subscriptionData = subscriptionDoc.data();
+            const status = subscriptionData?.status as string | undefined;
+
+            // Only ever touch a genuinely stuck 'incomplete' subscription —
+            // never an active/trialing one (e.g. a concurrent webhook update).
+            if (status !== 'incomplete') {
+                return { success: true };
+            }
+
+            const stripeSubscriptionId = subscriptionData?.stripeSubscriptionId;
+            if (stripeSubscriptionId) {
+                try {
+                    // Immediate cancellation, not cancel_at_period_end — an
+                    // incomplete subscription was never paid, so there's no
+                    // period to honor.
+                    await getStripe().subscriptions.cancel(stripeSubscriptionId);
+                } catch (stripeErr: any) {
+                    // May already be canceled/expired on Stripe's side —
+                    // don't block the Firestore reset on that.
+                    console.error('cancelIncompleteSubscription: Stripe cancel error (continuing):', stripeErr);
+                }
+            }
+
+            await admin.firestore().collection('subscriptions').doc(userId).update({
+                status: 'incomplete_expired',
+                canceledAt: admin.firestore.Timestamp.now(),
+            });
+
+            await syncPremiumStatus(userId, false);
+
+            return { success: true };
+        } catch (error: any) {
+            console.error('cancelIncompleteSubscription failed:', error);
+            throw new HttpsError('internal', 'Could not reset subscription. Please try again.');
+        }
+    }
+);
+
 // Toggle auto-renewal
 interface ToggleAutoRenewData {
     autoRenew: boolean;

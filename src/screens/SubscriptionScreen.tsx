@@ -19,7 +19,8 @@ import {
   subscriptionPlans,
   createSubscription,
   validateSubscription,
-  cancelSubscription
+  cancelSubscription,
+  cancelIncompleteSubscription
 } from '../services/payment/stripeService';
 
 interface SubscriptionScreenProps {
@@ -106,6 +107,10 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
         });
 
         if (confirmError || paymentIntent?.status !== 'Succeeded') {
+          // Clean up the now-orphaned 'incomplete' subscription so the user
+          // can retry immediately, instead of being blocked by
+          // createSubscription's already-exists guard.
+          await cancelIncompleteSubscription();
           Alert.alert('Payment Failed', confirmError?.message || 'Could not confirm your payment. Please try again.');
           setProcessing(false);
           return;
