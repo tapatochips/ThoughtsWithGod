@@ -15,7 +15,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
-import { useTranslation, Verse } from '../context/TranslationContext';
+import { useTranslation } from '../context/TranslationContext';
+import { Verse } from '../services/bible/types';
+import { loadBook } from '../services/bible/bibleData';
+import { BOOKS } from '../services/bible/bibleBooks';
 import {
   collection,
   doc,
@@ -27,12 +30,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import RenderHtml from 'react-native-render-html';
 import { useWindowDimensions } from 'react-native';
-
-interface BookInfo {
-  book_id: string;
-  book_name: string;
-  chapters: number;
-}
 
 interface ReadingProgress {
   book_id: string;
@@ -58,7 +55,7 @@ interface FavoriteVerse {
 const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, route }) => {
   const { user, db } = useFirebase();
   const { theme } = useTheme();
-  const { currentTranslation, availableTranslations, setTranslation, getVerses } = useTranslation();
+  const { currentTranslation, availableTranslations, setTranslation } = useTranslation();
   const { width } = useWindowDimensions();
   const [verses, setVerses] = useState<Verse[]>([]);
   const [currentBook, setCurrentBook] = useState('GEN');
@@ -67,53 +64,44 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
   const [showBookSelector, setShowBookSelector] = useState(false);
   const [showChapterSelector, setShowChapterSelector] = useState(false);
   const [showTranslationSelector, setShowTranslationSelector] = useState(false);
-  const [books, setBooks] = useState<BookInfo[]>([]);
+  const books = BOOKS;
   const [selectedVerses, setSelectedVerses] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const [readingProgress, setReadingProgress] = useState<ReadingProgress | null>(null);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
-  // Extract unique books from verses data
+  // Handle navigation parameters
   useEffect(() => {
-    const versesArray = getVerses();
-    const bookMap = new Map<string, BookInfo>();
-
-    versesArray.forEach(verse => {
-      if (!bookMap.has(verse.book_id)) {
-        bookMap.set(verse.book_id, {
-          book_id: verse.book_id,
-          book_name: verse.book_name,
-          chapters: 0
-        });
-      }
-      const book = bookMap.get(verse.book_id)!;
-      if (verse.chapter > book.chapters) {
-        book.chapters = verse.chapter;
-      }
-    });
-
-    const booksArray = Array.from(bookMap.values());
-    setBooks(booksArray);
-
-    // Handle navigation parameters
     const params = route?.params;
     if (params?.book && params?.chapter) {
-      const targetBook = booksArray.find(b => b.book_name === params.book);
+      const targetBook = books.find(b => b.book_name === params.book);
       if (targetBook) {
         setCurrentBook(targetBook.book_id);
         setCurrentChapter(params.chapter);
       }
     }
-  }, [route?.params, currentTranslation]);
+  }, [route?.params]);
 
-  // Load verses for current book/chapter
+  // Load verses for current book/chapter. On web this fetches the book the
+  // first time it's opened; the previous chapter stays on screen until then.
   useEffect(() => {
-    const versesArray = getVerses();
-    const filteredVerses = versesArray.filter(
-      verse => verse.book_id === currentBook && verse.chapter === currentChapter
-    );
-    setVerses(filteredVerses);
-    setLoading(false);
+    let cancelled = false;
+    loadBook(currentTranslation.id, currentBook)
+      .then((bookVerses) => {
+        if (!cancelled) {
+          setVerses(bookVerses.filter(verse => verse.chapter === currentChapter));
+        }
+      })
+      .catch((error) => {
+        console.error(`Error loading ${currentTranslation.id} ${currentBook}:`, error);
+        if (!cancelled) setVerses([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [currentBook, currentChapter, currentTranslation]);
 
   // Load user's reading progress

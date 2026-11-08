@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator, AppState, AppStateStatus } from 'react-native';
-import { StripeProvider } from '@stripe/stripe-react-native';
-import { STRIPE_PUBLISHABLE_KEY } from './src/services/payment/stripeService';
+import StripeWrapper from './src/components/payment/StripeWrapper';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 
@@ -250,10 +249,7 @@ const navigationTheme = {
 const App = () => {
   return (
     <ErrorBoundary>
-      <StripeProvider
-        publishableKey={STRIPE_PUBLISHABLE_KEY}
-        merchantIdentifier="merchant.com.yourcompany.thoughtswithgod"
-      >
+      <StripeWrapper>
         <FirebaseProvider>
           <ThemeProvider>
             <TranslationProvider>
@@ -261,7 +257,7 @@ const App = () => {
             </TranslationProvider>
           </ThemeProvider>
         </FirebaseProvider>
-      </StripeProvider>
+      </StripeWrapper>
     </ErrorBoundary>
   );
 };

@@ -15,6 +15,7 @@ const config: CommunityBoardConfig = {
   emptyIcon: 'people-outline',
   supportsAnonymous: true,
   supportsAnswered: true,
+  reportContentType: 'prayer',
 };
 
 const PrayerBoard: React.FC = () => <CommunityBoard config={config} />;

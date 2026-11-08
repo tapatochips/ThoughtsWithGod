@@ -21,7 +21,7 @@ module.exports = {
   owner: "tapatochips",
   name: "ThoughtsWithGod",
   slug: "ThoughtsWithGod",
-  version: "1.0.2",
+  version: "1.1.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "light",
@@ -41,7 +41,7 @@ module.exports = {
       backgroundColor: "#ffffff"
     },
     package: "com.tapatochips.thoughtswithgod",
-    versionCode: 10
+    versionCode: 11
   },
   web: {
     favicon: "./assets/favicon.png"

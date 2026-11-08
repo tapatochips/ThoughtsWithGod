@@ -34,6 +34,8 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { validatePrayer, validateComment, LIMITS } from '../../utils/inputValidation';
 import { formatRelativeDate } from '../../utils/dateUtils';
+import { ContentType, reportContent, blockUser } from '../../services/firebase/moderationService';
+import ModerationSheet from './ModerationSheet';
 
 // =================== TYPES ===================
 
@@ -79,16 +81,29 @@ export interface CommunityBoardConfig {
   supportsAnonymous?: boolean;
   /** Enables the "Mark Answered" owner action and Answered badge */
   supportsAnswered?: boolean;
+  /** Content type recorded on reports of posts in this board */
+  reportContentType: Extract<ContentType, 'prayer' | 'discussion'>;
 }
 
 interface CommunityBoardProps {
   config: CommunityBoardConfig;
 }
 
+/** The post or comment the report/block sheet is open for */
+interface ModerationTarget {
+  contentType: ContentType;
+  /** Full Firestore document path, so moderators can find it directly */
+  contentId: string;
+  /** Null for anonymous posts */
+  authorId: string | null;
+  authorName: string;
+  itemNoun: string;
+}
+
 // =================== COMPONENT ===================
 
 const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
-  const { user, db, userProfile } = useFirebase();
+  const { user, db, userProfile, blockedUserIds } = useFirebase();
   const { theme } = useTheme();
   const [newPost, setNewPost] = useState('');
   const [posts, setPosts] = useState<CommunityPost[]>([]);
@@ -100,8 +115,14 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
   const [submitting, setSubmitting] = useState(false);
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [ownedPostIds, setOwnedPostIds] = useState<Set<string>>(new Set());
+  const [moderationTarget, setModerationTarget] = useState<ModerationTarget | null>(null);
 
   const { collectionName } = config;
+
+  // Hide everything written by users the current user has blocked.
+  // Anonymous posts have no userId, so they can be reported but not blocked.
+  const visiblePosts = posts.filter((p) => !p.userId || !blockedUserIds.includes(p.userId));
+  const visibleComments = comments.filter((c) => !blockedUserIds.includes(c.userId));
 
   // Subscribe to posts
   useEffect(() => {
@@ -196,6 +217,12 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
 
   const isOwner = (post: CommunityPost) =>
     !!user && (post.userId === user.uid || ownedPostIds.has(post.id));
+
+  const renderAvatarInitial = (post: CommunityPost) =>
+    post.isAnonymous ? '?' : (post.username || 'U')[0].toUpperCase();
+
+  const renderUsername = (post: CommunityPost) =>
+    post.isAnonymous ? 'Anonymous' : (post.username || 'User');
 
   const handleAddPost = async () => {
     if (!user || !db || !newPost.trim()) return;
@@ -390,6 +417,72 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
     }
   };
 
+  const openPostModeration = (post: CommunityPost) => {
+    setModerationTarget({
+      contentType: config.reportContentType,
+      contentId: `${collectionName}/${post.id}`,
+      authorId: post.userId,
+      authorName: renderUsername(post),
+      itemNoun: config.itemNoun,
+    });
+  };
+
+  const openCommentModeration = (comment: CommunityComment) => {
+    if (!selectedPost) return;
+    setModerationTarget({
+      contentType: 'comment',
+      contentId: `${collectionName}/${selectedPost.id}/comments/${comment.id}`,
+      authorId: comment.userId,
+      authorName: comment.username || 'User',
+      itemNoun: 'comment',
+    });
+  };
+
+  const handleReport = async (reason: string) => {
+    if (!user || !db || !moderationTarget) return;
+    const target = moderationTarget;
+    setModerationTarget(null);
+
+    try {
+      await reportContent(db, user.uid, target.contentType, target.contentId, target.authorId, reason);
+      Alert.alert('Report Sent', 'Thank you. We will review this report.');
+    } catch (error) {
+      console.error('Error reporting content:', error);
+      Alert.alert('Error', 'Failed to send report. Please try again.');
+    }
+  };
+
+  const handleBlock = async () => {
+    if (!user || !db || !moderationTarget?.authorId) return;
+    const { authorId, authorName } = moderationTarget;
+    setModerationTarget(null);
+
+    try {
+      await blockUser(db, user.uid, authorId);
+      // The open post's author is now hidden, so close its comments.
+      if (selectedPost?.userId === authorId) {
+        setModalVisible(false);
+        setSelectedPost(null);
+      }
+      Alert.alert('User Blocked', `You won't see posts or comments from ${authorName} anymore.`);
+    } catch (error) {
+      console.error('Error blocking user:', error);
+      Alert.alert('Error', 'Failed to block user. Please try again.');
+    }
+  };
+
+  const renderModerationSheet = () =>
+    moderationTarget && (
+      <ModerationSheet
+        itemNoun={moderationTarget.itemNoun}
+        authorName={moderationTarget.authorName}
+        canBlock={!!moderationTarget.authorId}
+        onReport={handleReport}
+        onBlock={handleBlock}
+        onClose={() => setModerationTarget(null)}
+      />
+    );
+
   // =================== RENDER ===================
 
   if (loading) {
@@ -413,12 +506,6 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
       </View>
     );
   }
-
-  const renderAvatarInitial = (post: CommunityPost) =>
-    post.isAnonymous ? '?' : (post.username || 'U')[0].toUpperCase();
-
-  const renderUsername = (post: CommunityPost) =>
-    post.isAnonymous ? 'Anonymous' : (post.username || 'User');
 
   return (
     <KeyboardAvoidingView
@@ -492,7 +579,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
         </View>
 
         <FlatList
-          data={posts}
+          data={visiblePosts}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
@@ -522,11 +609,23 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
                   </View>
                 </View>
 
-                {config.supportsAnswered && item.answered && (
-                  <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
-                    <Text style={styles.answeredText}>Answered</Text>
-                  </View>
-                )}
+                <View style={styles.headerRight}>
+                  {config.supportsAnswered && item.answered && (
+                    <View style={[styles.answeredBadge, { backgroundColor: theme.colors.success }]}>
+                      <Text style={styles.answeredText}>Answered</Text>
+                    </View>
+                  )}
+                  {!isOwner(item) && (
+                    <TouchableOpacity
+                      style={styles.moreButton}
+                      onPress={() => openPostModeration(item)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Report or block, ${config.itemNoun}`}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
 
               <Text style={[styles.postText, { color: theme.colors.text }]}>
@@ -687,13 +786,13 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
               )}
 
               <FlatList
-                data={comments}
+                data={visibleComments}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.commentsList}
                 ListHeaderComponent={
-                  comments.length > 0 ? (
+                  visibleComments.length > 0 ? (
                     <Text style={[styles.commentsCount, { color: theme.colors.textSecondary }]}>
-                      {comments.length} {comments.length === 1 ? 'Comment' : 'Comments'}
+                      {visibleComments.length} {visibleComments.length === 1 ? 'Comment' : 'Comments'}
                     </Text>
                   ) : null
                 }
@@ -728,11 +827,22 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
                         </Text>
                       </View>
 
-                      {user?.uid === item.userId && (
+                      {user?.uid === item.userId ? (
                         <TouchableOpacity
                           onPress={() => handleDeleteComment(item.id, item.userId)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Delete comment"
                         >
                           <Ionicons name="trash-outline" size={16} color={theme.colors.danger} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.moreButton}
+                          onPress={() => openCommentModeration(item)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Report or block, comment"
+                        >
+                          <Ionicons name="ellipsis-horizontal" size={18} color={theme.colors.textSecondary} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -794,8 +904,13 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
                 </TouchableOpacity>
               </View>
             </KeyboardAvoidingView>
+
+            {/* Inside the Modal so it shows above the comments on iOS */}
+            {modalVisible && renderModerationSheet()}
           </View>
         </Modal>
+
+        {!modalVisible && renderModerationSheet()}
       </View>
     </KeyboardAvoidingView>
   );
@@ -910,6 +1025,17 @@ const styles = StyleSheet.create({
   },
   postDate: {
     fontSize: 12,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  moreButton: {
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   answeredBadge: {
     paddingHorizontal: 8,

@@ -8,7 +8,7 @@ import {
   Animated,
   Platform
 } from 'react-native';
-import versesData from '../data/combinedBible.json';
+import { getRandomVerse } from '../services/bible/bibleBooks';
 import RenderHtml from 'react-native-render-html';
 import { db } from "../services/firebase/firebaseReactNative";
 import { DocumentSnapshot, collection, doc, onSnapshot, deleteDoc, setDoc } from 'firebase/firestore';
@@ -37,7 +37,6 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     const { user, userProfile, db: contextDb } = useFirebase();
     const { theme } = useTheme();
     const [currentVerse, setCurrentVerse] = useState<Verse | null>(null);
-    const [verses, setVerses] = useState<Verse[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
     const fadeAnim = useState(new Animated.Value(0))[0];
@@ -45,19 +44,17 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     // Use either db from props or from context
     const effectiveDb = db || contextDb;
 
-    useEffect(() => {
+    // Picks a random KJV verse. On web this loads only the book it lands in.
+    const showRandomVerse = async () => {
         try {
-            const versesArray = versesData as Verse[];
-            setVerses(versesArray);
-            if (versesArray && versesArray.length > 0) {
-              const initialIndex = Math.floor(Math.random() * versesArray.length);
-              setCurrentVerse(versesArray[initialIndex]);
-            }
-          } catch (err) {
-            console.error('Failed to import verses:', err);
-          } finally {
-            setLoading(false);
-          }
+            setCurrentVerse(await getRandomVerse('KJV'));
+        } catch (err) {
+            console.error('Failed to load a random verse:', err);
+        }
+    };
+
+    useEffect(() => {
+        showRandomVerse().finally(() => setLoading(false));
     }, []);
 
     // Fade in effect when verse changes
@@ -96,10 +93,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
     }, [user, currentVerse, effectiveDb]); 
 
     const handleNextVerse = () => {
-        if (verses && verses.length > 0) {
-            const randomIndex = Math.floor(Math.random() * verses.length);
-            setCurrentVerse(verses[randomIndex]);
-        }
+        showRandomVerse();
     };
 
     const handleFavoritePress = async () => {
@@ -171,7 +165,7 @@ const VerseDisplay: React.FC<VerseDisplayProps> = ({ navigation }) => {
         );
     }
 
-    if (!verses || verses.length === 0) {
+    if (!currentVerse) {
         return (
             <View style={[styles.loadingContainer, { backgroundColor: theme.colors.background }]}>
                 <Text style={{ color: theme.colors.text }}>No verses found.</Text>

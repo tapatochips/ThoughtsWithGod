@@ -1,50 +1,39 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { TranslationId } from '../services/bible/types';
 
-// Import Bible data
-import kjvData from '../data/combinedBible.json';
-import asvData from '../data/combinedBibleASV.json';
-
-export interface Verse {
-  book_id: string;
-  book_name: string;
-  chapter: number;
-  verse: number;
-  text: string;
-  info: string;
-}
+// Which translation is selected. The verses themselves are loaded per book
+// through loadBook() in services/bible/bibleData.
 
 export interface Translation {
-  id: string;
+  id: TranslationId;
   name: string;
   abbreviation: string;
   description: string;
-  data: Verse[];
 }
 
 // Available translations
-const translations: Record<string, Translation> = {
+const translations: Record<TranslationId, Translation> = {
   KJV: {
     id: 'KJV',
     name: 'King James Version',
     abbreviation: 'KJV',
     description: 'The classic 1611 King James translation',
-    data: kjvData as Verse[],
   },
   ASV: {
     id: 'ASV',
     name: 'American Standard Version',
     abbreviation: 'ASV',
     description: 'The 1901 American Standard Version',
-    data: asvData as Verse[],
   },
 };
+
+const isTranslationId = (value: string): value is TranslationId => value in translations;
 
 interface TranslationContextType {
   currentTranslation: Translation;
   availableTranslations: Translation[];
-  setTranslation: (translationId: string) => Promise<void>;
-  getVerses: () => Verse[];
+  setTranslation: (translationId: TranslationId) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -53,7 +42,7 @@ const TranslationContext = createContext<TranslationContextType | undefined>(und
 const STORAGE_KEY = '@bible_translation';
 
 export const TranslationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentTranslationId, setCurrentTranslationId] = useState<string>('KJV');
+  const [currentTranslationId, setCurrentTranslationId] = useState<TranslationId>('KJV');
   const [isLoading, setIsLoading] = useState(true);
 
   // Load saved translation preference
@@ -61,7 +50,7 @@ export const TranslationProvider: React.FC<{ children: ReactNode }> = ({ childre
     const loadSavedTranslation = async () => {
       try {
         const saved = await AsyncStorage.getItem(STORAGE_KEY);
-        if (saved && translations[saved]) {
+        if (saved && isTranslationId(saved)) {
           setCurrentTranslationId(saved);
         }
       } catch (error) {
@@ -74,26 +63,19 @@ export const TranslationProvider: React.FC<{ children: ReactNode }> = ({ childre
     loadSavedTranslation();
   }, []);
 
-  const setTranslation = async (translationId: string) => {
-    if (translations[translationId]) {
-      setCurrentTranslationId(translationId);
-      try {
-        await AsyncStorage.setItem(STORAGE_KEY, translationId);
-      } catch (error) {
-        console.error('Error saving translation preference:', error);
-      }
+  const setTranslation = async (translationId: TranslationId) => {
+    setCurrentTranslationId(translationId);
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, translationId);
+    } catch (error) {
+      console.error('Error saving translation preference:', error);
     }
-  };
-
-  const getVerses = (): Verse[] => {
-    return translations[currentTranslationId]?.data || [];
   };
 
   const value: TranslationContextType = {
     currentTranslation: translations[currentTranslationId],
     availableTranslations: Object.values(translations),
     setTranslation,
-    getVerses,
     isLoading,
   };
 

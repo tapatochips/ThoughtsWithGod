@@ -36,13 +36,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createUserProfile = exports.deleteAccount = exports.stripeWebhook = exports.sendReceiptEmail = exports.checkPremiumAccess = exports.validateSubscription = exports.updateDefaultPaymentMethod = exports.getPaymentMethods = exports.toggleAutoRenew = exports.cancelIncompleteSubscription = exports.cancelSubscription = exports.createPaymentIntent = exports.createSubscription = void 0;
+exports.createUserProfile = exports.deleteAccount = exports.revenueCatWebhook = exports.stripeWebhook = exports.sendReceiptEmail = exports.checkPremiumAccess = exports.validateSubscription = exports.updateDefaultPaymentMethod = exports.getPaymentMethods = exports.toggleAutoRenew = exports.cancelIncompleteSubscription = exports.cancelSubscription = exports.createPaymentIntent = exports.createSubscription = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const https_2 = require("firebase-functions/v2/https");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const admin = __importStar(require("firebase-admin"));
 const stripe_1 = __importDefault(require("stripe"));
 const nodemailer = __importStar(require("nodemailer"));
+const crypto_1 = require("crypto");
 // Initialize Firebase Admin (only once)
 if (admin.apps.length === 0) {
     admin.initializeApp();
@@ -189,6 +190,7 @@ exports.createSubscription = (0, https_1.onCall)({
         await admin.firestore().collection('subscriptions').doc(userId).set({
             userId,
             planId,
+            provider: 'stripe',
             status: subscription.status,
             stripeSubscriptionId: subscription.id,
             stripeCustomerId: customerId,
@@ -431,7 +433,7 @@ exports.validateSubscription = (0, https_1.onCall)({
     cors: getCorsConfig(),
     secrets: ['STRIPE_SECRET_KEY'],
 }, async (request) => {
-    var _a;
+    var _a, _b;
     if (!request.auth) {
         throw new https_1.HttpsError('unauthenticated', 'Must be logged in');
     }
@@ -445,6 +447,25 @@ exports.validateSubscription = (0, https_1.onCall)({
             return { active: false };
         }
         const subscriptionData = subscriptionDoc.data();
+        // iOS subscriptions are validated by RevenueCat server-side before
+        // its webhook ever writes to Firestore, so the Firestore doc is
+        // trusted directly here — no live RevenueCat API call is made.
+        if ((subscriptionData === null || subscriptionData === void 0 ? void 0 : subscriptionData.provider) === 'apple') {
+            const now = admin.firestore.Timestamp.now();
+            const endDate = subscriptionData.endDate;
+            const isNotExpired = endDate && endDate.toMillis() > now.toMillis();
+            const isActive = subscriptionData.status === 'active' && isNotExpired;
+            if (!isActive) {
+                await syncPremiumStatus(userId, false);
+                return { active: false };
+            }
+            return {
+                active: true,
+                plan: subscriptionData.planId,
+                endDate: endDate === null || endDate === void 0 ? void 0 : endDate.toDate().toISOString(),
+                autoRenew: (_a = subscriptionData.autoRenew) !== null && _a !== void 0 ? _a : true,
+            };
+        }
         const stripeSubscriptionId = subscriptionData === null || subscriptionData === void 0 ? void 0 : subscriptionData.stripeSubscriptionId;
         if (!stripeSubscriptionId) {
             await syncPremiumStatus(userId, false);
@@ -470,7 +491,7 @@ exports.validateSubscription = (0, https_1.onCall)({
             active: isActive && isNotExpired,
             plan: subscriptionData.planId,
             endDate: endDate === null || endDate === void 0 ? void 0 : endDate.toDate().toISOString(),
-            autoRenew: (_a = subscriptionData.autoRenew) !== null && _a !== void 0 ? _a : true,
+            autoRenew: (_b = subscriptionData.autoRenew) !== null && _b !== void 0 ? _b : true,
         };
     }
     catch (error) {
@@ -752,6 +773,113 @@ exports.stripeWebhook = (0, https_2.onRequest)({
     }
     catch (error) {
         console.error('Error processing webhook:', error);
+        response.status(500).send('Webhook processing failed');
+    }
+});
+// =================== REVENUECAT WEBHOOK (Apple IAP) ===================
+// Product ID (App Store Connect) -> our internal plan id. Must stay in sync
+// with the appleProductId values in src/services/payment/subscriptionPlans.ts
+// and the planPrices map in createSubscription above.
+const applePlanByProductId = {
+    'com.tapatochips.thoughtswithgod.monthly_basic': 'monthly_basic',
+    'com.tapatochips.thoughtswithgod.monthly_premium': 'monthly_premium',
+    'com.tapatochips.thoughtswithgod.monthly_pro': 'monthly_pro',
+    'com.tapatochips.thoughtswithgod.yearly_premium': 'yearly_premium',
+};
+exports.revenueCatWebhook = (0, https_2.onRequest)({
+    cors: false,
+    secrets: ['REVENUECAT_WEBHOOK_AUTH_HEADER'],
+}, async (request, response) => {
+    var _a;
+    const expectedAuth = process.env.REVENUECAT_WEBHOOK_AUTH_HEADER;
+    const providedAuth = request.headers['authorization'];
+    if (!expectedAuth || typeof providedAuth !== 'string') {
+        response.status(401).send('Unauthorized');
+        return;
+    }
+    // Constant-time comparison to avoid leaking the secret via timing.
+    const expectedBuf = Buffer.from(expectedAuth);
+    const providedBuf = Buffer.from(providedAuth);
+    const isValid = expectedBuf.length === providedBuf.length &&
+        (0, crypto_1.timingSafeEqual)(expectedBuf, providedBuf);
+    if (!isValid) {
+        response.status(401).send('Unauthorized');
+        return;
+    }
+    const event = (_a = request.body) === null || _a === void 0 ? void 0 : _a.event;
+    if (!(event === null || event === void 0 ? void 0 : event.id) || !event.type || !event.app_user_id) {
+        response.status(400).send('Malformed event');
+        return;
+    }
+    // Idempotency: same pattern as stripeWebhook — RevenueCat retries on
+    // non-2xx responses, and reprocessing would repeat Firestore writes.
+    try {
+        await admin.firestore().collection('processedWebhookEvents').doc(event.id).create({
+            type: event.type,
+            processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
+    catch (err) {
+        console.log(`RevenueCat webhook event ${event.id} already processed, skipping.`);
+        response.json({ received: true, duplicate: true });
+        return;
+    }
+    const userId = event.app_user_id;
+    const planId = event.product_id ? applePlanByProductId[event.product_id] : undefined;
+    try {
+        switch (event.type) {
+            case 'INITIAL_PURCHASE':
+            case 'RENEWAL':
+            case 'UNCANCELLATION':
+            case 'PRODUCT_CHANGE': {
+                const expiryMs = event.expiration_at_ms;
+                const endDate = expiryMs ? new Date(expiryMs) : null;
+                await admin.firestore().collection('subscriptions').doc(userId).set({
+                    userId,
+                    provider: 'apple',
+                    status: 'active',
+                    planId: planId !== null && planId !== void 0 ? planId : admin.firestore.FieldValue.delete(),
+                    revenueCatAppUserId: userId,
+                    endDate: endDate ? admin.firestore.Timestamp.fromDate(endDate) : null,
+                    currentPeriodEnd: endDate ? admin.firestore.Timestamp.fromDate(endDate) : null,
+                    autoRenew: true,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+                await syncPremiumStatus(userId, true, planId, endDate !== null && endDate !== void 0 ? endDate : undefined);
+                break;
+            }
+            case 'CANCELLATION': {
+                // User retains access until expiration_at_ms — do not
+                // deactivate yet, only stop auto-renewal (mirrors Stripe's
+                // cancel_at_period_end semantics).
+                await admin.firestore().collection('subscriptions').doc(userId).set({
+                    autoRenew: false,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+                break;
+            }
+            case 'EXPIRATION': {
+                await admin.firestore().collection('subscriptions').doc(userId).set({
+                    status: 'canceled',
+                    canceledAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+                await syncPremiumStatus(userId, false);
+                break;
+            }
+            case 'BILLING_ISSUE': {
+                await admin.firestore().collection('subscriptions').doc(userId).set({
+                    paymentStatus: 'failed',
+                    lastPaymentFailure: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+                break;
+            }
+            default:
+                console.log(`Unhandled RevenueCat event type ${event.type}`);
+        }
+        response.json({ received: true });
+    }
+    catch (error) {
+        console.error('Error processing RevenueCat webhook:', error);
         response.status(500).send('Webhook processing failed');
     }
 });

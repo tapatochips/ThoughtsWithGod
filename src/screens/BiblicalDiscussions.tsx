@@ -13,6 +13,7 @@ const config: CommunityBoardConfig = {
   emptyTitle: 'No discussions yet',
   emptySubtitle: 'Be the first to share a biblical discussion',
   emptyIcon: 'book-outline',
+  reportContentType: 'discussion',
 };
 
 const BiblicalDiscussions: React.FC = () => <CommunityBoard config={config} />;
