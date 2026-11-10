@@ -31,7 +31,7 @@ The current work is the web app. The plan, story list and progress are in `docs/
 
 - `npm run web`: dev server at http://localhost:8081. Add `--clear` after build errors
 - `npx tsc --noEmit`: type-check. Must be clean before a change is done
-- `npx expo export -p web --output-dir dist`: production web build. Note the bundle size (3.78 MB after B-2)
+- `npx expo export -p web --output-dir dist`: production web build. Note the bundle size (2.85 MB after C-2)
 - `npx expo export -p android --output-dir dist-android`: check that a change to shared code still bundles for native
 - `npm run bible:split`: regenerate `public/bible/` and `src/data/bibleIndex.json` after changing anything in `src/data/`
 
@@ -45,8 +45,9 @@ Current examples:
 - `src/screens/SubscriptionScreen.tsx` / `.web.tsx` (the web file is a placeholder until P-1)
 - `src/services/bible/bibleData.ts` / `.web.ts`
 - `src/components/common/dialog.tsx` / `.web.tsx`
+- `src/services/payment/revenueCatService.tsx` / `.web.ts` (every web export throws)
 
-Native-only libraries must never be imported from code the web bundle loads: `@stripe/stripe-react-native` and `react-native-purchases`. RevenueCat still reaches the web bundle through `FirebaseContext.tsx` → `revenueCatService.tsx`; story C-2 fixes that.
+Native-only libraries must never be imported from code the web bundle loads: `@stripe/stripe-react-native` and `react-native-purchases`.
 
 ## Bible data
 

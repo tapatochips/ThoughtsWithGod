@@ -38,11 +38,12 @@ As of Nov 8, the web app runs in the browser with `npm run web`. Sign-in works, 
 | B-2 Load books on demand | Done, 4G timing not yet measured | `services/bible/bibleData.ts` (native, bundled) and `bibleData.web.ts` (fetch and cache one book). Web bundle went from 16.4 MB to 3.78 MB. The largest book, Psalms, is 441 KB, about 93 KB compressed |
 | B-3 Random verse and favorites | Done | The random verse picks a verse from the index, then loads only that book. Favorites store their own verse text, so they never load a translation |
 | C-3 Confirmation dialogs | Done, not yet tested signed in or on a device | `components/common/dialog.tsx` (native, wraps `Alert.alert`) and `dialog.web.tsx` (a themed modal, rendered by `<DialogHost />` in `App.tsx`). `confirm()` asks before an action and `notify()` shows a message. All 39 `Alert.alert` calls in 4 files now use them (`BibleReader.tsx` had 2). Checked on web from the sign-in page: Cancel, OK, Escape and two dialogs queued in a row |
+| C-2 RevenueCat off the web | Done, not yet tested signed in on web | New `services/payment/revenueCatService.web.ts` exports the same functions as the native file, and each one throws if called. The web bundle went from 3.78 MB to 2.85 MB and no longer contains `react-native-purchases`. The native file is unchanged, so iOS and Android behave as before. Android still bundles RevenueCat but never calls it |
 
 **Found along the way**
 
 - **KJV book order fixed.** The KJV source file is sorted alphabetically by book code, so the reader's book list and next/previous-book arrows ran 1 Chronicles, 1 Corinthians, and so on. The reader now always uses Genesis to Revelation, from `BIBLE_BOOKS`.
-- **RevenueCat is about 0.9 MB of the remaining web bundle** (`react-native-purchases` and its helper packages). It didn't crash the page, but C-2 is worth doing for bundle size.
+- **RevenueCat was about 0.9 MB of the web bundle** (`react-native-purchases` and its helper packages). C-2 removed it.
 - **The daily verse is always KJV,** whatever translation is selected. This was already the case before; decide whether it should follow the selected translation.
 - **A missing book file returns the app's HTML page, not a 404,** on the dev server, and will on Firebase Hosting once S-3 adds the usual rewrite. It still fails, just as a JSON parse error rather than a clear "not found".
 - **Reports aren't sent anywhere.** They only land in the `reports` collection. Apple expects you to act on them, so check the collection regularly until there's a notification.
@@ -51,7 +52,7 @@ As of Nov 8, the web app runs in the browser with `npm run web`. Sign-in works, 
 - **`package-lock.json` was out of sync** with `package.json` (missing `expo-font`), so `npm ci` failed. Running `npm install` and committing the lock file fixes it.
 - **Editing a favorite's note uses `Alert.prompt`,** which only exists on iOS, so it does nothing on web or Android (`FavoritesScreen.tsx`). It needs a text-input dialog, which C-3 didn't cover.
 
-**Next up:** C-2, then the rest of Sprint 1.
+**Next up:** S-3 (Firebase Hosting), then the rest of Sprint 1.
 
 ## What breaks on web today
 
