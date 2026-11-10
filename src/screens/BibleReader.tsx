@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Modal,
   FlatList,
-  Alert,
   ActivityIndicator,
   StatusBar,
   Platform
@@ -15,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFirebase } from '../context/FirebaseContext';
 import { useTheme } from '../context/ThemeProvider';
+import { notify } from '../components/common/dialog';
 import { useTranslation } from '../context/TranslationContext';
 import { Verse } from '../services/bible/types';
 import { loadBook } from '../services/bible/bibleData';
@@ -249,10 +249,10 @@ const BibleReader: React.FC<{ navigation?: any; route?: any }> = ({ navigation, 
       await Promise.all(promises);
       setSelectedVerses(new Set());
       setSelectionMode(false);
-      Alert.alert('Success', 'Verses added to favorites!');
+      notify('Success', 'Verses added to favorites!');
     } catch (error) {
       console.error('Error adding to favorites:', error);
-      Alert.alert('Error', 'Failed to add verses to favorites');
+      notify('Error', 'Failed to add verses to favorites');
     }
   };
 

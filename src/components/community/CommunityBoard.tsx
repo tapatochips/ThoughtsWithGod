@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
-  Alert,
   Modal,
   Platform,
   ActivityIndicator,
@@ -36,6 +35,7 @@ import { validatePrayer, validateComment, LIMITS } from '../../utils/inputValida
 import { formatRelativeDate } from '../../utils/dateUtils';
 import { ContentType, reportContent, blockUser } from '../../services/firebase/moderationService';
 import ModerationSheet from './ModerationSheet';
+import { confirm, notify } from '../common/dialog';
 
 // =================== TYPES ===================
 
@@ -229,7 +229,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
 
     const validation = validatePrayer(newPost);
     if (!validation.valid) {
-      Alert.alert('Invalid Input', validation.error);
+      notify('Invalid Input', validation.error);
       return;
     }
 
@@ -282,7 +282,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
       setIsAnonymous(false);
     } catch (error) {
       console.error(`Error adding ${config.itemNoun}:`, error);
-      Alert.alert('Error', `Failed to add ${config.itemNoun}. Please try again.`);
+      notify('Error', `Failed to add ${config.itemNoun}. Please try again.`);
     } finally {
       setSubmitting(false);
     }
@@ -298,7 +298,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
       });
     } catch (error) {
       console.error(`Error updating ${config.itemNoun}:`, error);
-      Alert.alert('Error', `Failed to update ${config.itemNoun}. Please try again.`);
+      notify('Error', `Failed to update ${config.itemNoun}. Please try again.`);
     }
   };
 
@@ -306,48 +306,44 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
     if (!user || !db) return;
 
     if (!isOwner(post)) {
-      Alert.alert('Permission Denied', `You can only delete your own ${config.itemNoun}s.`);
+      notify('Permission Denied', `You can only delete your own ${config.itemNoun}s.`);
       return;
     }
 
-    Alert.alert(
-      'Confirm Delete',
-      `Are you sure you want to delete this ${config.itemNoun}? This will also delete all comments.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Delete all comments in chunked batches (Firestore batch limit is 500 ops).
-              // Rules allow the post owner to delete comments under their own post.
-              const commentsCollection = collection(db, `${collectionName}/${post.id}/comments`);
-              const commentsSnapshot = await getDocs(commentsCollection);
-              const commentDocs = commentsSnapshot.docs;
-              for (let i = 0; i < commentDocs.length; i += 400) {
-                const chunk = commentDocs.slice(i, i + 400);
-                const commentBatch = writeBatch(db);
-                chunk.forEach((commentDoc) => commentBatch.delete(commentDoc.ref));
-                await commentBatch.commit();
-              }
+    const confirmed = await confirm({
+      title: 'Confirm Delete',
+      message: `Are you sure you want to delete this ${config.itemNoun}? This will also delete all comments.`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      destructive: true,
+    });
+    if (!confirmed) return;
 
-              // Delete the post and (for anonymous posts) the private ownership
-              // record together, so neither can be left behind.
-              const finalBatch = writeBatch(db);
-              finalBatch.delete(doc(db, collectionName, post.id));
-              if (config.supportsAnonymous && post.isAnonymous) {
-                finalBatch.delete(doc(db, `users/${user.uid}/ownedPrayers`, post.id));
-              }
-              await finalBatch.commit();
-            } catch (error) {
-              console.error(`Error deleting ${config.itemNoun}:`, error);
-              Alert.alert('Error', `Failed to delete ${config.itemNoun}. Please try again.`);
-            }
-          }
-        }
-      ]
-    );
+    try {
+      // Delete all comments in chunked batches (Firestore batch limit is 500 ops).
+      // Rules allow the post owner to delete comments under their own post.
+      const commentsCollection = collection(db, `${collectionName}/${post.id}/comments`);
+      const commentsSnapshot = await getDocs(commentsCollection);
+      const commentDocs = commentsSnapshot.docs;
+      for (let i = 0; i < commentDocs.length; i += 400) {
+        const chunk = commentDocs.slice(i, i + 400);
+        const commentBatch = writeBatch(db);
+        chunk.forEach((commentDoc) => commentBatch.delete(commentDoc.ref));
+        await commentBatch.commit();
+      }
+
+      // Delete the post and (for anonymous posts) the private ownership
+      // record together, so neither can be left behind.
+      const finalBatch = writeBatch(db);
+      finalBatch.delete(doc(db, collectionName, post.id));
+      if (config.supportsAnonymous && post.isAnonymous) {
+        finalBatch.delete(doc(db, `users/${user.uid}/ownedPrayers`, post.id));
+      }
+      await finalBatch.commit();
+    } catch (error) {
+      console.error(`Error deleting ${config.itemNoun}:`, error);
+      notify('Error', `Failed to delete ${config.itemNoun}. Please try again.`);
+    }
   };
 
   const handleToggleLike = async (post: CommunityPost) => {
@@ -375,7 +371,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
 
     const validation = validateComment(newComment);
     if (!validation.valid) {
-      Alert.alert('Invalid Input', validation.error);
+      notify('Invalid Input', validation.error);
       return;
     }
 
@@ -394,7 +390,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
       setNewComment('');
     } catch (error) {
       console.error('Error adding comment:', error);
-      Alert.alert('Error', 'Failed to add comment. Please try again.');
+      notify('Error', 'Failed to add comment. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -404,7 +400,7 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
     if (!user || !db || !selectedPost) return;
 
     if (user.uid !== commentUserId) {
-      Alert.alert('Permission Denied', 'You can only delete your own comments.');
+      notify('Permission Denied', 'You can only delete your own comments.');
       return;
     }
 
@@ -445,10 +441,10 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
 
     try {
       await reportContent(db, user.uid, target.contentType, target.contentId, target.authorId, reason);
-      Alert.alert('Report Sent', 'Thank you. We will review this report.');
+      notify('Report Sent', 'Thank you. We will review this report.');
     } catch (error) {
       console.error('Error reporting content:', error);
-      Alert.alert('Error', 'Failed to send report. Please try again.');
+      notify('Error', 'Failed to send report. Please try again.');
     }
   };
 
@@ -464,10 +460,10 @@ const CommunityBoard: React.FC<CommunityBoardProps> = ({ config }) => {
         setModalVisible(false);
         setSelectedPost(null);
       }
-      Alert.alert('User Blocked', `You won't see posts or comments from ${authorName} anymore.`);
+      notify('User Blocked', `You won't see posts or comments from ${authorName} anymore.`);
     } catch (error) {
       console.error('Error blocking user:', error);
-      Alert.alert('Error', 'Failed to block user. Please try again.');
+      notify('Error', 'Failed to block user. Please try again.');
     }
   };
 

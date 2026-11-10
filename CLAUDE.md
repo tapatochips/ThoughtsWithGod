@@ -44,6 +44,7 @@ Current examples:
 - `src/components/payment/StripeWrapper.tsx` / `.web.tsx`
 - `src/screens/SubscriptionScreen.tsx` / `.web.tsx` (the web file is a placeholder until P-1)
 - `src/services/bible/bibleData.ts` / `.web.ts`
+- `src/components/common/dialog.tsx` / `.web.tsx`
 
 Native-only libraries must never be imported from code the web bundle loads: `@stripe/stripe-react-native` and `react-native-purchases`. RevenueCat still reaches the web bundle through `FirebaseContext.tsx` → `revenueCatService.tsx`; story C-2 fixes that.
 
@@ -56,7 +57,7 @@ Native-only libraries must never be imported from code the web bundle loads: `@s
 
 ## Things to know
 
-- `Alert.alert` does nothing on react-native-web. Until the shared `confirm()` helper exists (story C-3), anything that relies on it is silently broken on web, including delete account and delete post.
+- `Alert.alert` does nothing on react-native-web. Use `confirm()` and `notify()` from `src/components/common/dialog` instead; never call `Alert.alert` directly.
 - Report and block live in `src/components/community/ModerationSheet.tsx` and `CommunityBoard.tsx`, and call `src/services/firebase/moderationService.ts`. Reports only land in the Firestore `reports` collection; nothing notifies anyone yet.
 - Never commit `.env`.
 - Keep `package-lock.json` in sync with `package.json` and commit it, or `npm ci` (and EAS builds) fail.

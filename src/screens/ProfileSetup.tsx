@@ -5,7 +5,6 @@ import {
   Text, 
   StyleSheet, 
   TextInput, 
-  Alert,
   TouchableOpacity,
   ScrollView,
   Platform
@@ -14,6 +13,7 @@ import { useFirebase } from '../context/FirebaseContext';
 import { updateUsername, updateUserPreferences } from '../services/firebase/userProfile';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeProvider';
+import { confirm, notify } from '../components/common/dialog';
 import { useTranslation } from '../context/TranslationContext';
 import { Ionicons } from '@expo/vector-icons';
 import { httpsCallable } from 'firebase/functions';
@@ -61,43 +61,39 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ navigation }) => {
       });
       
       await refreshUserProfile();
-      Alert.alert('Success', 'Profile updated successfully!');
+      notify('Success', 'Profile updated successfully!');
       navigation.goBack();
     } catch (error) {
       console.error('Error updating profile:', error);
-      Alert.alert('Error', 'Failed to update profile. Please try again.');
+      notify('Error', 'Failed to update profile. Please try again.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This will permanently delete your account, all your data, prayer requests, and cancel any active subscription. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete Account',
-          style: 'destructive',
-          onPress: async () => {
-            if (!user || !functions || !auth) return;
-            setIsDeleting(true);
-            try {
-              const deleteAccountFn = httpsCallable(functions, 'deleteAccount');
-              await deleteAccountFn({});
-              // Auth account is deleted server-side; sign out the local session
-              await signOut(auth);
-            } catch (error) {
-              console.error('Error deleting account:', error);
-              Alert.alert('Error', 'Failed to delete account. Please try again or contact support@thoughtswithgod.com.');
-            } finally {
-              setIsDeleting(false);
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteAccount = async () => {
+    const confirmed = await confirm({
+      title: 'Delete Account',
+      message: 'This will permanently delete your account, all your data, prayer requests, and cancel any active subscription. This cannot be undone.',
+      confirmText: 'Delete Account',
+      cancelText: 'Cancel',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    if (!user || !functions || !auth) return;
+
+    setIsDeleting(true);
+    try {
+      const deleteAccountFn = httpsCallable(functions, 'deleteAccount');
+      await deleteAccountFn({});
+      // Auth account is deleted server-side; sign out the local session
+      await signOut(auth);
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      notify('Error', 'Failed to delete account. Please try again or contact support@thoughtswithgod.com.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Handle theme selection with immediate update

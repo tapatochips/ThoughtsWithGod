@@ -37,6 +37,7 @@ As of Nov 8, the web app runs in the browser with `npm run web`. Sign-in works, 
 | B-1 Per-book files | Done | `scripts/splitBibleData.js` (run with `npm run bible:split`) writes `public/bible/{kjv,asv}/{BOOK_ID}.json`, e.g. `/bible/kjv/JHN.json`, plus `src/data/bibleIndex.json` (verse counts per chapter). The generated files are committed; `public/bible/` is in `.easignore` |
 | B-2 Load books on demand | Done, 4G timing not yet measured | `services/bible/bibleData.ts` (native, bundled) and `bibleData.web.ts` (fetch and cache one book). Web bundle went from 16.4 MB to 3.78 MB. The largest book, Psalms, is 441 KB, about 93 KB compressed |
 | B-3 Random verse and favorites | Done | The random verse picks a verse from the index, then loads only that book. Favorites store their own verse text, so they never load a translation |
+| C-3 Confirmation dialogs | Done, not yet tested signed in or on a device | `components/common/dialog.tsx` (native, wraps `Alert.alert`) and `dialog.web.tsx` (a themed modal, rendered by `<DialogHost />` in `App.tsx`). `confirm()` asks before an action and `notify()` shows a message. All 39 `Alert.alert` calls in 4 files now use them (`BibleReader.tsx` had 2). Checked on web from the sign-in page: Cancel, OK, Escape and two dialogs queued in a row |
 
 **Found along the way**
 
@@ -48,8 +49,9 @@ As of Nov 8, the web app runs in the browser with `npm run web`. Sign-in works, 
 - **There's no unblock screen.** `unblockUser` exists but nothing calls it.
 - **The Apple Pay merchant ID is a placeholder** (`merchant.com.yourcompany.thoughtswithgod`) in `StripeWrapper.tsx`, while `app.config.js` uses `merchant.com.tapatochips.thoughtswithgod`.
 - **`package-lock.json` was out of sync** with `package.json` (missing `expo-font`), so `npm ci` failed. Running `npm install` and committing the lock file fixes it.
+- **Editing a favorite's note uses `Alert.prompt`,** which only exists on iOS, so it does nothing on web or Android (`FavoritesScreen.tsx`). It needs a text-input dialog, which C-3 didn't cover.
 
-**Next up:** C-3 (`confirm()` helper, since several actions do nothing on web), then C-2, then the rest of Sprint 1.
+**Next up:** C-2, then the rest of Sprint 1.
 
 ## What breaks on web today
 

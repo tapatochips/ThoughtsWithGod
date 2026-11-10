@@ -22,6 +22,7 @@ import { useFirebase, FirebaseProvider } from './src/context/FirebaseContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeProvider';
 import { TranslationProvider } from './src/context/TranslationContext';
 import ErrorBoundary from './src/components/common/ErrorBoundary';
+import { DialogHost } from './src/components/common/dialog';
 // import BannerAd from './src/components/ads/BannerAd'; // TODO: Re-enable when AdMob is set up
 
 // mock notifications
@@ -254,6 +255,7 @@ const App = () => {
           <ThemeProvider>
             <TranslationProvider>
               <AppContent />
+              <DialogHost />
             </TranslationProvider>
           </ThemeProvider>
         </FirebaseProvider>

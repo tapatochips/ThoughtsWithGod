@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Platform,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +12,7 @@ import {
 import { CardField, useStripe } from '@stripe/stripe-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeProvider';
+import { confirm, notify } from '../components/common/dialog';
 import { useFirebase } from '../context/FirebaseContext';
 import { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { subscriptionPlans, validateSubscription, isApplePlatform } from '../services/payment/paymentProvider';
@@ -63,12 +63,12 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
 
   const handleSubscribe = async () => {
     if (!user) {
-      Alert.alert('Sign In Required', 'Please sign in to subscribe.');
+      notify('Sign In Required', 'Please sign in to subscribe.');
       return;
     }
 
     if (!cardComplete) {
-      Alert.alert('Incomplete Card', 'Please enter your complete card details.');
+      notify('Incomplete Card', 'Please enter your complete card details.');
       return;
     }
 
@@ -80,7 +80,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
       });
 
       if (stripeError || !paymentMethod) {
-        Alert.alert('Card Error', stripeError?.message || 'Could not process card details.');
+        notify('Card Error', stripeError?.message || 'Could not process card details.');
         setProcessing(false);
         return;
       }
@@ -91,7 +91,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
       );
 
       if (!result.success) {
-        Alert.alert('Payment Failed', result.error || 'Please try again.');
+        notify('Payment Failed', result.error || 'Please try again.');
         setProcessing(false);
         return;
       }
@@ -102,7 +102,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
       // are presented) before the subscription becomes active.
       if (result.status !== 'active' && result.status !== 'trialing') {
         if (!result.clientSecret) {
-          Alert.alert('Payment Failed', 'Could not confirm your payment. Please try again.');
+          notify('Payment Failed', 'Could not confirm your payment. Please try again.');
           setProcessing(false);
           return;
         }
@@ -116,28 +116,19 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
           // can retry immediately, instead of being blocked by
           // createSubscription's already-exists guard.
           await cancelIncompleteSubscription();
-          Alert.alert('Payment Failed', confirmError?.message || 'Could not confirm your payment. Please try again.');
+          notify('Payment Failed', confirmError?.message || 'Could not confirm your payment. Please try again.');
           setProcessing(false);
           return;
         }
       }
 
-      Alert.alert(
-        'Success!',
-        'Your subscription has been activated. Thank you for your support!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              refreshPremiumStatus();
-              navigation.goBack();
-            }
-          }
-        ]
-      );
+      notify('Success!', 'Your subscription has been activated. Thank you for your support!').then(() => {
+        refreshPremiumStatus();
+        navigation.goBack();
+      });
     } catch (error) {
       console.error('Error processing subscription:', error);
-      Alert.alert('Error', 'An error occurred while processing your payment.');
+      notify('Error', 'An error occurred while processing your payment.');
     } finally {
       setProcessing(false);
     }
@@ -145,7 +136,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
 
   const handleSubscribeApple = async () => {
     if (!user) {
-      Alert.alert('Sign In Required', 'Please sign in to subscribe.');
+      notify('Sign In Required', 'Please sign in to subscribe.');
       return;
     }
 
@@ -156,7 +147,7 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
       const pkg = packages.find(p => p.product.identifier === selectedPlan.appleProductId);
 
       if (!pkg) {
-        Alert.alert('Payment Failed', 'This plan is not currently available. Please try again later.');
+        notify('Payment Failed', 'This plan is not currently available. Please try again later.');
         setProcessing(false);
         return;
       }
@@ -169,31 +160,22 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
       }
 
       if (!result.success) {
-        Alert.alert('Payment Failed', result.error || 'Please try again.');
+        notify('Payment Failed', result.error || 'Please try again.');
         setProcessing(false);
         return;
       }
 
-      Alert.alert(
-        'Success!',
-        'Your subscription has been activated. Thank you for your support!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Firestore is populated by the RevenueCat webhook asynchronously,
-              // so a short retry gives it time to land before the app navigates
-              // away and the premium UI is checked again.
-              refreshPremiumStatus();
-              setTimeout(() => refreshPremiumStatus(), 1500);
-              navigation.goBack();
-            }
-          }
-        ]
-      );
+      notify('Success!', 'Your subscription has been activated. Thank you for your support!').then(() => {
+        // Firestore is populated by the RevenueCat webhook asynchronously,
+        // so a short retry gives it time to land before the app navigates
+        // away and the premium UI is checked again.
+        refreshPremiumStatus();
+        setTimeout(() => refreshPremiumStatus(), 1500);
+        navigation.goBack();
+      });
     } catch (error) {
       console.error('Error processing Apple subscription:', error);
-      Alert.alert('Error', 'An error occurred while processing your payment.');
+      notify('Error', 'An error occurred while processing your payment.');
     } finally {
       setProcessing(false);
     }
@@ -204,14 +186,14 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
     try {
       const result = await restorePurchases();
       if (result.success && result.active) {
-        Alert.alert('Restored', 'Your subscription has been restored.');
+        notify('Restored', 'Your subscription has been restored.');
         refreshPremiumStatus();
         await checkCurrentSubscription();
       } else {
-        Alert.alert('No Purchases Found', 'We could not find a previous purchase to restore.');
+        notify('No Purchases Found', 'We could not find a previous purchase to restore.');
       }
     } catch (error) {
-      Alert.alert('Error', 'An error occurred while restoring your purchases.');
+      notify('Error', 'An error occurred while restoring your purchases.');
     } finally {
       setProcessing(false);
     }
@@ -224,34 +206,30 @@ const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({ navigation }) =
       return;
     }
 
-    Alert.alert(
-      'Cancel Subscription',
-      'Are you sure you want to cancel your subscription? You will continue to have access until the end of your billing period.',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: async () => {
-            setProcessing(true);
-            try {
-              const success = await cancelSubscription();
-              if (success) {
-                Alert.alert('Subscription Canceled', 'Your subscription has been canceled.');
-                await checkCurrentSubscription();
-                refreshPremiumStatus();
-              } else {
-                Alert.alert('Error', 'Failed to cancel subscription. Please try again.');
-              }
-            } catch (error) {
-              Alert.alert('Error', 'An error occurred while canceling your subscription.');
-            } finally {
-              setProcessing(false);
-            }
-          }
-        }
-      ]
-    );
+    const confirmed = await confirm({
+      title: 'Cancel Subscription',
+      message: 'Are you sure you want to cancel your subscription? You will continue to have access until the end of your billing period.',
+      confirmText: 'Yes, Cancel',
+      cancelText: 'No',
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setProcessing(true);
+    try {
+      const success = await cancelSubscription();
+      if (success) {
+        notify('Subscription Canceled', 'Your subscription has been canceled.');
+        await checkCurrentSubscription();
+        refreshPremiumStatus();
+      } else {
+        notify('Error', 'Failed to cancel subscription. Please try again.');
+      }
+    } catch (error) {
+      notify('Error', 'An error occurred while canceling your subscription.');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const getShadowStyle = (theme: any) => {
