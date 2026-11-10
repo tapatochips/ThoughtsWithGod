@@ -4,7 +4,7 @@ A Bible reading and prayer app built with Expo 54, React Native 0.81 and TypeScr
 
 - **iOS:** subscriptions through RevenueCat (`react-native-purchases`)
 - **Android:** subscriptions through Stripe (`@stripe/stripe-react-native`)
-- **Web:** react-native-web, hosted on Firebase Hosting (not set up yet). Subscriptions will use Stripe Checkout (story P-1)
+- **Web:** react-native-web, hosted on Firebase Hosting at `thoughtswithgod-a5a08.web.app` (custom domain not connected yet). Subscriptions will use Stripe Checkout (story P-1)
 - **Backend:** Firebase Auth, Firestore and Cloud Functions, all in `functions/` (`index.tsx`, `firestore.rules`, `firebase.json`)
 
 The current work is the web app. The plan, story list and progress are in `docs/web-plan.md`. Work one story at a time, and update its row in the plan's Progress table when it's done.
@@ -31,7 +31,8 @@ The current work is the web app. The plan, story list and progress are in `docs/
 
 - `npm run web`: dev server at http://localhost:8081. Add `--clear` after build errors
 - `npx tsc --noEmit`: type-check. Must be clean before a change is done
-- `npx expo export -p web --output-dir dist`: production web build. Note the bundle size (2.85 MB after C-2)
+- `npx expo export -p web --output-dir dist`: production web build. Note the bundle size (2.89 MB with Analytics)
+- `npm run web:preview`: build and deploy to a 7-day Firebase Hosting preview channel. `npm run web:deploy` builds and deploys live. Hosting config is the root `firebase.json`; functions and Firestore rules still deploy from `functions/`
 - `npx expo export -p android --output-dir dist-android`: check that a change to shared code still bundles for native
 - `npm run bible:split`: regenerate `public/bible/` and `src/data/bibleIndex.json` after changing anything in `src/data/`
 
@@ -46,6 +47,7 @@ Current examples:
 - `src/services/bible/bibleData.ts` / `.web.ts`
 - `src/components/common/dialog.tsx` / `.web.tsx`
 - `src/services/payment/revenueCatService.tsx` / `.web.ts` (every web export throws)
+- `src/services/firebase/analytics.ts` / `.web.ts` (Google Analytics runs on web only)
 
 Native-only libraries must never be imported from code the web bundle loads: `@stripe/stripe-react-native` and `react-native-purchases`.
 

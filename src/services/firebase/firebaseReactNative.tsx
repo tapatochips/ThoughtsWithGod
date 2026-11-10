@@ -1,6 +1,9 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
+import { initAnalytics } from './analytics';
+import {getAnalytics} from 'firebase/analytics';
+
 
 if (__DEV__) console.log("firebaseReactNative.tsx: Start");
 
@@ -8,6 +11,7 @@ if (__DEV__) console.log("firebaseReactNative.tsx: Start");
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  databaseURL: process.env.EXPO_PUBLIC_FIREBASE_DATABASE_URL,
   projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
   storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
@@ -52,6 +56,15 @@ if (firebaseInstance.app) {
     if (__DEV__) console.log("Firestore initialized");
   } catch (error) {
     console.error("Error initializing Firestore:", error);
+  }
+}
+
+// Initialize Analytics (web only; does nothing on native)
+if (firebaseInstance.app) {
+  try {
+    initAnalytics(firebaseInstance.app);
+  } catch (error) {
+    console.error("Error initializing Analytics:", error);
   }
 }
 
